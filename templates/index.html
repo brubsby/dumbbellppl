@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Dumbbell Push Pull Legs</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/css/bootstrap.min.css" integrity="sha384-PsH8R72JQ3SOdhVi3uxftmaW6Vc51MKb0q5P2rRUpPvrszuE4W1povHYgTpBfshb" crossorigin="anonymous">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
+</head>
+<body>
+<div class="container" style="margin-top: 100px;">
+    <form id="lift-reps" class="control-group" method="post" action="/submit">
+        <input type="hidden" name="workout-id" value="{{ workout_id }}">
+        {% for lift in todays_lifts %}
+        <div class="form-group row">
+            <label for="{{ loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
+            <div class="col-sm-2">
+                <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="12">
+            </div>
+            <div class="col-sm-2">
+                <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="12">
+            </div>
+            <div class="col-sm-2">
+                <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="12">
+            </div>
+            <div class="col-sm-2">
+                {% if 'weight' in lift %}
+                <input type="number" class="form-control" readonly id="weight{{ loop.index }}" name="weight{{ loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
+                {% else %}
+                <select class="form-control" id="weight{{  loop.index }}" name="weight{{  loop.index }}">
+                    {% for weight in available_weights %}
+                    <option>{{weight}}</option>
+                    {% endfor %}
+                </select>
+                {% endif %}
+            </div>
+            <label for="weight{{ loop.index }}" class="col-sm-1 col-form-label">{{ unit }}</label>
+        </div>
+        {% endfor %}
+    <button class="btn btn-primary" form="lift-reps">Submit</button>
+    </form>
+</div>
+<div class="container" style="margin-top: 100px;">
+    <div class="progress">
+        <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" style="width: 100%;">
+            <span class="sr-only"></span>
+        </div>
+    </div>
+    <button class="btn btn-secondary" onclick="startTimer()">Start Timer</button>
+</div>
+
+<!-- Optional JavaScript -->
+<!-- my javascript-->
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
+<!-- jQuery first, then Popper.js, then Bootstrap JS -->
+<script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ" crossorigin="anonymous"></script>
+</body>
+</html>

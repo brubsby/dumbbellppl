@@ -9,8 +9,13 @@
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
 </head>
 <body>
+{% if fail_validation %}
+<div class="alert alert-danger" role="alert">
+  <strong>Validation error!</strong> I haven't implemented front end validation so you'll have to try again.
+</div>
+{% endif %}
 <div class="container" style="margin-top: 100px;">
-    <form id="lift-reps" class="control-group" method="post" action="/submit">
+    <form id="lift-reps" class="control-group" method="post" action="/">
         <input type="hidden" name="workout-id" value="{{ workout_id }}">
         {% for lift in todays_lifts %}
         <div class="form-group row">

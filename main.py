@@ -2,6 +2,7 @@ import flask
 import sqlite3
 import itertools
 import datetime
+import colander
 
 import os
 
@@ -157,6 +158,38 @@ def get_todays_lift_data():
         return lift_data
 
 
+class Lift(colander.MappingSchema):
+    set_1_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
+    set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
+    set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
+    dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
+
+
+class Lifts(colander.SequenceSchema):
+    lifts = Lift()
+
+
+class Workout(colander.MappingSchema):
+    workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS))
+    lifts = Lifts()
+
+
+def process_form(dict):
+    return_dict = {'workout_id': dict.pop('workout-id'), 'lifts': []}
+    weight_format_string = 'weight%i'
+    lift_index = 1
+    while True:
+        if weight_format_string % lift_index not in dict:
+            break
+        lift_to_add = {'dumbbell_weight': dict.pop(weight_format_string % lift_index, None)}
+        for set_index in range(1, 4):
+            rep_string_key = 'lift%iset%i' % (lift_index, set_index)
+            lift_to_add['set_%i_reps' % set_index] = dict.pop(rep_string_key, None)
+        return_dict['lifts'].append(lift_to_add)
+        lift_index += 1
+    return return_dict
+
+
 def save_form_to_db(form):
     now_date = datetime.date.today()
     with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
@@ -176,16 +209,26 @@ def save_form_to_db(form):
                            (form['workout-id'], now_date))
 
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def show_basic():
-    return flask.render_template("index.html", todays_lifts=get_todays_lift_data(), unit="lbs",
-                                 available_weights=AVAILABLE_WEIGHTS, workout_id=DAY_WORKOUT_DICT[datetime.datetime.now().weekday()])
-
-
-@app.route('/submit', methods=['POST'])
-def submit_data():
-    save_form_to_db(flask.request.form)
-    return show_basic()
+    if flask.request.method == 'POST':
+        schema = Workout()
+        form_dict = process_form(flask.request.form.to_dict())
+        try:
+            schema.deserialize(form_dict)
+            save_form_to_db(flask.request.form)
+            return flask.render_template("index.html", todays_lifts=get_todays_lift_data(), unit="lbs",
+                                         available_weights=AVAILABLE_WEIGHTS,
+                                         workout_id=DAY_WORKOUT_DICT[datetime.datetime.now().weekday()])
+        except colander.Invalid:
+            return flask.render_template("index.html", todays_lifts=get_todays_lift_data(), unit="lbs",
+                                         available_weights=AVAILABLE_WEIGHTS,
+                                         workout_id=DAY_WORKOUT_DICT[datetime.datetime.now().weekday()],
+                                         fail_validation=True)
+    else:
+        return flask.render_template("index.html", todays_lifts=get_todays_lift_data(), unit="lbs",
+                                     available_weights=AVAILABLE_WEIGHTS,
+                                     workout_id=DAY_WORKOUT_DICT[datetime.datetime.now().weekday()])
 
 
 @app.route('/static/<path:path>')

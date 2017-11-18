@@ -150,7 +150,7 @@ def get_todays_lift_data():
             lift_dict["weight"] = data[0][0]
             lift_data.append(lift_dict)
 
-        return lift_data
+        return {"workout_id": workout, "lift_data": lift_data}
 
 
 class Lift(colander.MappingSchema):
@@ -207,10 +207,9 @@ def save_form_to_db(form):
 @app.route('/', methods=['GET', 'POST'])
 def show_basic():
     kwargs = {
-        'todays_lifts': get_todays_lift_data(),
         'unit': "lbs",
         'available_weights': AVAILABLE_WEIGHTS,
-        'workout_id': DAY_WORKOUT_DICT[datetime.datetime.now().weekday()]
+        **get_todays_lift_data()
     }
     if flask.request.method == 'POST':
         schema = Workout()

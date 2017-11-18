@@ -25,24 +25,21 @@
         <div class="card-body">
             <form id="lift-reps" class="control-group" method="post" action="/">
                 <input type="hidden" name="workout-id" value="{{ workout_id }}">
-                {% for lift in todays_lifts %}
+                {% for lift in lift_data %}
+                {% set outer_loop = loop %}
                 <div class="form-group row">
-                    <label for="{{ loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
+                    <label for="{{ outer_loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
+                    {% for i in range(3) %}
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="{{lift['previous_reps'][0]|default(12)}}">
+                        <input type="number" class="form-control" id="{{ outer_loop.index }}-{{ loop.index }}" name="lift{{ outer_loop.index }}set{{ loop.index }}" placeholder="{{lift['previous_reps'][loop.index0]|default(12)}}">
                     </div>
-                    <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="{{lift['previous_reps'][1]|default(12)}}">
-                    </div>
-                    <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="{{lift['previous_reps'][2]|default(12)}}">
-                    </div>
+                    {% endfor %}
                     <div class="col-sm-3">
                         <div class="input-group">
                             {% if 'weight' in lift %}
-                            <input type="number" class="form-control" readonly id="weight{{ loop.index }}" name="weight{{ loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
+                            <input type="number" class="form-control" readonly id="weight{{ outer_loop.index }}" name="weight{{ outer_loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
                             {% else %}
-                            <select class="form-control" id="weight{{  loop.index }}" name="weight{{  loop.index }}">
+                            <select class="form-control" id="weight{{  outer_loop.index }}" name="weight{{  outer_loop.index }}">
                                 {% for weight in available_weights %}
                                 <option>{{weight}}</option>
                                 {% endfor %}

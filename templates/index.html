@@ -53,8 +53,12 @@
         </div>
     </div>
     <button class="btn btn-secondary" onclick="startTimer()">Start Timer</button>
+    <button class="btn btn-tertiary" onclick="resetTimer()">Reset</button>
 </div>
 
+
+<!-- Preload Audio -->
+<audio id="alert-audio" src="{{ url_for('static', filename='timer.ogg') }}" preload="auto" loop></audio>
 <!-- Optional JavaScript -->
 <!-- my javascript-->
 <script src="{{ url_for('static', filename='js/index.js') }}"></script>

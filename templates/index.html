@@ -29,13 +29,13 @@
                 <div class="form-group row">
                     <label for="{{ loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="12">
+                        <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="{{lift['previous_reps'][0]|default(12)}}">
                     </div>
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="12">
+                        <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="{{lift['previous_reps'][1]|default(12)}}">
                     </div>
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="12">
+                        <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="{{lift['previous_reps'][2]|default(12)}}">
                     </div>
                     <div class="col-sm-3">
                         <div class="input-group">

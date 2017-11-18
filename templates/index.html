@@ -14,50 +14,67 @@
   <strong>Validation error!</strong> I haven't implemented front end validation so you'll have to try again.
 </div>
 {% endif %}
-<div class="container" style="margin-top: 100px;">
-    <form id="lift-reps" class="control-group" method="post" action="/">
-        <input type="hidden" name="workout-id" value="{{ workout_id }}">
-        {% for lift in todays_lifts %}
-        <div class="form-group row">
-            <label for="{{ loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
-            <div class="col-sm-2">
-                <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="12">
-            </div>
-            <div class="col-sm-2">
-                <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="12">
-            </div>
-            <div class="col-sm-2">
-                <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="12">
-            </div>
-            <div class="col-sm-3">
-                <div class="input-group">
-                    {% if 'weight' in lift %}
-                    <input type="number" class="form-control" readonly id="weight{{ loop.index }}" name="weight{{ loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
-                    {% else %}
-                    <select class="form-control" id="weight{{  loop.index }}" name="weight{{  loop.index }}">
-                        {% for weight in available_weights %}
-                        <option>{{weight}}</option>
-                        {% endfor %}
-                    </select>
-                    {% endif %}
-                    <span class="input-group-addon">{{ unit }}</span>
-                </div>
-            </div>
+<nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
+    <a class="navbar-brand" href="#">Dumbbell PPL</a>
+</nav>
+<div class="container" style="margin-top: 150px;">
+    <div class="card">
+        <div class="card-header">
+        Today's Workout: {{ workout_id }}
         </div>
-        {% endfor %}
-    <button class="btn btn-primary" form="lift-reps">Submit</button>
-    </form>
-</div>
-<div class="container" style="margin-top: 100px;">
-    <div class="progress">
-        <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" style="width: 100%;">
-            <span class="sr-only"></span>
+        <div class="card-body">
+            <form id="lift-reps" class="control-group" method="post" action="/">
+                <input type="hidden" name="workout-id" value="{{ workout_id }}">
+                {% for lift in todays_lifts %}
+                <div class="form-group row">
+                    <label for="{{ loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
+                    <div class="col-sm-2">
+                        <input type="number" class="form-control" id="{{ loop.index }}-1" name="lift{{ loop.index }}set1" placeholder="12">
+                    </div>
+                    <div class="col-sm-2">
+                        <input type="number" class="form-control" id="{{ loop.index }}-2" name="lift{{  loop.index }}set2" placeholder="12">
+                    </div>
+                    <div class="col-sm-2">
+                        <input type="number" class="form-control" id="{{ loop.index }}-3" name="lift{{   loop.index }}set3" placeholder="12">
+                    </div>
+                    <div class="col-sm-3">
+                        <div class="input-group">
+                            {% if 'weight' in lift %}
+                            <input type="number" class="form-control" readonly id="weight{{ loop.index }}" name="weight{{ loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
+                            {% else %}
+                            <select class="form-control" id="weight{{  loop.index }}" name="weight{{  loop.index }}">
+                                {% for weight in available_weights %}
+                                <option>{{weight}}</option>
+                                {% endfor %}
+                            </select>
+                            {% endif %}
+                            <span class="input-group-addon">{{ unit }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            <button class="btn btn-primary" form="lift-reps">Submit</button>
+            </form>
         </div>
     </div>
 </div>
-<div class="container" style="margin-top: 10px;">
-    <button class="btn btn-secondary" onclick="startTimer()">Start Timer</button>
-    <button class="btn btn-tertiary" onclick="resetTimer()">Reset</button>
+<div class="container" style="margin-top: 50px;">
+    <div class="card">
+        <div class="card-header">
+        Rest Timer (90 sec)
+        </div>
+        <div class="card-body">
+            <div class="progress">
+                <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" style="width: 100%;">
+                    <span class="sr-only"></span>
+                </div>
+            </div>
+            <div class="container" style="margin-top: 10px;">
+                <button class="btn btn-secondary" onclick="startTimer()">Start</button>
+                <button class="btn btn-tertiary" onclick="resetTimer()">Reset</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 

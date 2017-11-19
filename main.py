@@ -75,7 +75,13 @@ def create_tables_if_not_exist():
             'FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID));')
 
 
-def get_todays_workout(conn):
+def is_todays_workout_done(conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
+    return cursor.fetchone()[0] == datetime.date.today()
+
+
+def get_next_workout(conn):
     now_date = datetime.date.today()
     cursor = conn.cursor()
     cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
@@ -112,45 +118,63 @@ def get_todays_workout(conn):
     return DAY_WORKOUT_DICT[datetime.datetime.now().weekday()]
 
 
-def get_todays_lift_data():
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        cursor = conn.cursor()
-        lift_data = []
-        workout = get_todays_workout(conn)
-        for lift in WORKOUTS[workout]:
-            cursor.execute(
-                "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
-                "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-                "ORDER BY Date DESC LIMIT 3", (lift,))
-            data = cursor.fetchall()
-            lift_dict = {"name": lift, "previous_reps": []}
-            if data[0][0] is None:
-                lift_data.append(lift_dict)
-                continue
-            lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
-            if data[0][1] >= 12 and data[0][2] >= 12 and data[0][3] >= 12:
-                lift_dict["weight"] = \
-                    AVAILABLE_WEIGHTS[min(AVAILABLE_WEIGHTS.index(data[0][0]) + 1, len(AVAILABLE_WEIGHTS) - 1)]
-                lift_data.append(lift_dict)
-                continue
-            if len(data) >= 2:
-                rep_total_list = []
-                for i in range(2):
-                    rep_total_list.append(data[i][1] + data[i][2] + data[i][3])
-                if rep_total_list[0] < rep_total_list[1]:
-                    lift_dict["weight"] = \
-                             AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
-                    lift_data.append(lift_dict)
-                    continue
-            if len(data) >= 3 and data[0] == data[1] == data[2]:
-                lift_dict["weight"] = \
-                    AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
-                lift_data.append(lift_dict)
-                continue
-            lift_dict["weight"] = data[0][0]
-            lift_data.append(lift_dict)
+def get_todays_workout_data(conn):
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT Workouts.Name "
+        "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
+        "ORDER BY Date DESC LIMIT 1;")
+    workout = cursor.fetchone()[0]
+    lift_data = []
+    for lift in WORKOUTS[workout]:
+        cursor.execute(
+            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
+            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
+            "ORDER BY Date DESC LIMIT 1", (lift,))
+        lift_row = cursor.fetchone()
+        lift_dict = {"name": lift, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
+        lift_data.append(lift_dict)
+    return {"workout_id": workout, "lift_data": lift_data}
 
-        return {"workout_id": workout, "lift_data": lift_data}
+
+def get_new_workout_data(conn):
+    cursor = conn.cursor()
+    lift_data = []
+    workout = get_next_workout(conn)
+    for lift in WORKOUTS[workout]:
+        cursor.execute(
+            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
+            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
+            "ORDER BY Date DESC LIMIT 3", (lift,))
+        data = cursor.fetchall()
+        lift_dict = {"name": lift, "previous_reps": []}
+        if data[0][0] is None:
+            lift_data.append(lift_dict)
+            continue
+        lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
+        if data[0][1] >= 12 and data[0][2] >= 12 and data[0][3] >= 12:
+            lift_dict["weight"] = \
+                AVAILABLE_WEIGHTS[min(AVAILABLE_WEIGHTS.index(data[0][0]) + 1, len(AVAILABLE_WEIGHTS) - 1)]
+            lift_data.append(lift_dict)
+            continue
+        if len(data) >= 2:
+            rep_total_list = []
+            for i in range(2):
+                rep_total_list.append(data[i][1] + data[i][2] + data[i][3])
+            if rep_total_list[0] < rep_total_list[1]:
+                lift_dict["weight"] = \
+                         AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
+                lift_data.append(lift_dict)
+                continue
+        if len(data) >= 3 and data[0] == data[1] == data[2]:
+            lift_dict["weight"] = \
+                AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
+            lift_data.append(lift_dict)
+            continue
+        lift_dict["weight"] = data[0][0]
+        lift_data.append(lift_dict)
+
+    return {"workout_id": workout, "lift_data": lift_data}
 
 
 class Lift(colander.MappingSchema):
@@ -185,44 +209,51 @@ def process_form(dict):
     return return_dict
 
 
-def save_form_to_db(form):
+def save_form_to_db(form, conn):
     now_date = datetime.date.today()
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM LiftHistory WHERE Date = ? LIMIT 1",
-                       (now_date,))
-        data = cursor.fetchall()
-        if not data:
-            i = 1
-            for lift in WORKOUTS[form['workout-id']]:
-                cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
-                               "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
-                               (lift, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
-                i += 1
-            cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                           "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",
-                           (form['workout-id'], now_date))
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM WorkoutHistory WHERE Date = ? LIMIT 1",
+                   (now_date,))
+    data = cursor.fetchall()
+    if not data:
+        i = 1
+        for lift in WORKOUTS[form['workout-id']]:
+            cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
+                           "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
+                           (lift, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
+            i += 1
+        cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
+                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",
+                       (form['workout-id'], now_date))
+    else:
+        raise colander.Invalid(None, "You aren't allowed to submit two workouts in a day")
 
 
 @app.route('/', methods=['GET', 'POST'])
 def show_basic():
-    kwargs = {
-        'unit': "lbs",
-        'available_weights': AVAILABLE_WEIGHTS,
-        **get_todays_lift_data()
-    }
-    if flask.request.method == 'POST':
-        schema = Workout()
-        form_dict = process_form(flask.request.form.to_dict())
-        try:
-            schema.deserialize(form_dict)
-            save_form_to_db(flask.request.form)
+    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        kwargs = {
+            'unit': "lbs",
+            'available_weights': AVAILABLE_WEIGHTS
+        }
+        if is_todays_workout_done(conn):
+            kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
+        else:
+            kwargs = {**kwargs, **get_new_workout_data(conn)}
+
+        if flask.request.method == 'POST':
+            schema = Workout()
+            form_dict = process_form(flask.request.form.to_dict())
+            try:
+                schema.deserialize(form_dict)
+                save_form_to_db(flask.request.form, conn)
+                kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
+                return flask.render_template("index.html", **kwargs)
+            except colander.Invalid:
+                kwargs['fail_validation'] = True
+                return flask.render_template("index.html", **kwargs)
+        else:
             return flask.render_template("index.html", **kwargs)
-        except colander.Invalid:
-            kwargs['fail_validation'] = True
-            return flask.render_template("index.html", **kwargs)
-    else:
-        return flask.render_template("index.html", **kwargs)
 
 
 @app.route('/static/<path:path>')

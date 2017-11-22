@@ -1,2 +1,2 @@
-ba_colander==1.0b1
-Flask==0.12.2
+colander
+Flask

@@ -23,7 +23,7 @@
               <strong>Validation error!</strong> I haven't implemented front end validation so you'll have to fill out the form again.
             </div>
             {% endif %}
-            <form id="lift-reps" class="control-group" method="post" action="/">
+            <form id="lift-reps" class="control-group" method="post" action="/?offset={{ request.args.get('offset','') }}">
                 <input type="hidden" name="workout-id" value="{{ workout_id }}">
                 {% for lift in lift_data %}
                 {% set outer_loop = loop %}

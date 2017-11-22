@@ -30,6 +30,7 @@ app = flask.Flask(__name__)
 
 
 def create_tables_if_not_exist():
+    os.makedirs(os.path.join('data'), exist_ok=True)
     with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -75,47 +76,77 @@ def create_tables_if_not_exist():
             'FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID));')
 
 
-def is_todays_workout_done(conn):
+def is_todays_workout_done(conn, now_date):
     cursor = conn.cursor()
     cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    return cursor.fetchone()[0] == datetime.date.today()
+    todays_workout_row = cursor.fetchone()
+    if not todays_workout_row:
+        return False
+    return todays_workout_row[0] == now_date
 
 
 def get_next_workout(conn):
-    now_date = datetime.date.today()
     cursor = conn.cursor()
     cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    most_recent_workout_date = cursor.fetchone()
-    if not most_recent_workout_date:
+    most_recent_workout_date_row = cursor.fetchone()
+    if not most_recent_workout_date_row:
         # no data, start on push
         return "PUSH_LIFTS"
+    last_six_workouts = get_last_six_workouts(conn)
+    if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
+        return 'REST'
     else:
-        # if a day was missed, insert the misses into workout history
-        most_recent_workout_date = most_recent_workout_date[0]
-        dates_to_miss = []
-        while most_recent_workout_date < now_date - datetime.timedelta(days=1):
-            dates_to_miss.append(most_recent_workout_date)
-            most_recent_workout_date = most_recent_workout_date + datetime.timedelta(days=1)
-        cursor.executemany("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                           "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?);",
-                           (('MISS', date) for date in dates_to_miss))
+        cursor.execute(
+            "SELECT Workouts.Name "
+            "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
+            "WHERE Workouts.Name NOT IN ('REST', 'MISS')"
+            "ORDER BY Date DESC LIMIT 1;")
+        last_non_rest_or_miss_workout = cursor.fetchone()[0]
+        if not last_non_rest_or_miss_workout:
+            return 'PUSH_LIFTS'
+        if last_non_rest_or_miss_workout == 'PUSH_LIFTS':
+            return 'PULL_LIFTS'
+        if last_non_rest_or_miss_workout == 'PULL_LIFTS':
+            return 'LEG_LIFTS'
+        if last_non_rest_or_miss_workout == 'LEG_LIFTS':
+            return 'PUSH_LIFTS'
+    raise RuntimeError("Couldn't determine what workout day it is.")
+
+
+def get_last_six_workouts(conn):
+    cursor = conn.cursor()
     cursor.execute(
         "SELECT Workouts.Name "
         "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
         "ORDER BY Date DESC LIMIT 6;")
     last_six_workouts = [tup[0] for tup in cursor.fetchall()]
-    if last_six_workouts:
+    return last_six_workouts
+
+
+def fill_rests_and_misses(conn, now_date):
+    # if any workout days were missed, insert the misses/rests into workout history
+    cursor = conn.cursor()
+    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
+    most_recent_workout_date_row = cursor.fetchone()
+    if not most_recent_workout_date_row:
+        # no workout data, return
+        return
+    most_recent_workout_date = most_recent_workout_date_row[0]
+    last_six_workouts = get_last_six_workouts(conn)
+    workout_date_tuple_to_add = []
+    iteration_date = most_recent_workout_date + datetime.timedelta(days=1)
+    # rest day can only be the first day in a string of misses, can also be today
+    if iteration_date <= now_date:
         if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
-            return 'REST'
-        else:
-            last_workout = last_six_workouts[0]
-            if last_workout == 'PUSH_LIFTS':
-                return 'PULL_LIFTS'
-            if last_workout == 'PULL_LIFTS':
-                return 'LEG_LIFTS'
-            if last_workout == 'LEG_LIFTS':
-                return 'PUSH_LIFTS'
-    return DAY_WORKOUT_DICT[datetime.datetime.now().weekday()]
+            workout_date_tuple_to_add.append(('REST', iteration_date))
+            iteration_date = iteration_date + datetime.timedelta(days=1)
+    # fill in all days up to and including yesterday with misses, if there was no workout
+    while iteration_date < now_date:
+        workout_date_tuple_to_add.append(('MISS', iteration_date))
+        iteration_date = iteration_date + datetime.timedelta(days=1)
+    cursor.executemany("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
+                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?);",
+                       (tup for tup in workout_date_tuple_to_add))
 
 
 def get_todays_workout_data(conn):
@@ -209,8 +240,7 @@ def process_form(dict):
     return return_dict
 
 
-def save_form_to_db(form, conn):
-    now_date = datetime.date.today()
+def save_form_to_db(form, conn, now_date):
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM WorkoutHistory WHERE Date = ? LIMIT 1",
                    (now_date,))
@@ -236,7 +266,10 @@ def show_basic():
             'unit': "lbs",
             'available_weights': AVAILABLE_WEIGHTS
         }
-        if is_todays_workout_done(conn):
+        now_date = datetime.date.today() + datetime.timedelta(
+            days=flask.request.args.get('offset', default=0, type=int))
+        fill_rests_and_misses(conn, now_date)
+        if is_todays_workout_done(conn, now_date):
             kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
         else:
             kwargs = {**kwargs, **get_new_workout_data(conn)}
@@ -246,7 +279,7 @@ def show_basic():
             form_dict = process_form(flask.request.form.to_dict())
             try:
                 schema.deserialize(form_dict)
-                save_form_to_db(flask.request.form, conn)
+                save_form_to_db(flask.request.form, conn, now_date)
                 kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
                 return flask.render_template("index.html", **kwargs)
             except colander.Invalid:
@@ -269,6 +302,6 @@ def favicon():
 
 if __name__ == '__main__':
     create_tables_if_not_exist()
-    app.run(host='127.0.0.1', port=80)
+    app.run(host='127.0.0.1', port=8080)
 
 

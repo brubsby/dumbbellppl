@@ -31,7 +31,7 @@
                     <label for="{{ outer_loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
                     {% for i in range(3) %}
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ outer_loop.index }}-{{ loop.index }}" name="lift{{ outer_loop.index }}set{{ loop.index }}" placeholder="{{lift['previous_reps'][loop.index0]|default(12)}}">
+                        <input type="number" class="form-control reps" id="{{ outer_loop.index }}-{{ loop.index }}" name="lift{{ outer_loop.index }}set{{ loop.index }}" placeholder="{{lift['previous_reps'][loop.index0]|default(12)}}">
                     </div>
                     {% endfor %}
                     <div class="col-sm-3">
@@ -90,5 +90,13 @@
     $(":input").attr("disabled", true).each(function(ev) {if(!$(this).val()) {$(this).val($(this).attr("placeholder"));}});
 </script>
 {% endif %}
+<!--Script to start timer on rep change-->
+<script>
+    $( document ).ready(function() {
+        $('.reps').on('change', function(){
+            startTimer();
+        });
+    });
+</script>
 </body>
 </html>

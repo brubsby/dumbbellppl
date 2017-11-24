@@ -209,9 +209,9 @@ def get_new_workout_data(conn):
 
 
 class Lift(colander.MappingSchema):
-    set_1_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
-    set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
-    set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 20))
+    set_1_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
+    set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
+    set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
 
 

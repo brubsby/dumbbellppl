@@ -1,2 +1,4 @@
 colander
 Flask
+bokeh
+pandas

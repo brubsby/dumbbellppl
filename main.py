@@ -5,7 +5,6 @@ import datetime
 import colander
 from bokeh.plotting import figure
 from bokeh.embed import components
-from bokeh.models import sources
 from bokeh.palettes import Category20
 import pandas
 

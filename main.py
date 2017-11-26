@@ -8,6 +8,7 @@ import colander
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
+from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
 
@@ -333,31 +334,45 @@ def show_basic():
 def send_stats():
 
     # create a new plot with a title and axis labels
-    p = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', sizing_mode='scale_width')
+    weight_plot = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', sizing_mode='scale_width')
+    volume_plot = figure(title="Volume Per Lift Over Time", x_axis_label='Date', y_axis_label='Volume', x_axis_type='datetime', sizing_mode='scale_width')
     with sqlite3.connect(os.path.join('data', 'userdata.db'),
                          detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
         for name, row in lifts_df.iterrows():
             df = pandas.read_sql_query(
-                "SELECT Name, Date, Weight, Reps1, Reps2, Reps3 "
+                "SELECT Name, Date, Weight, Reps1, Reps2, Reps3, VolumeMultiplier, AsymmetryMultiplier, "
+                "(Weight * (Reps1 + Reps2 + Reps3) * VolumeMultiplier * AsymmetryMultiplier) as Volume "
                 "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
                 "WHERE LiftFK = %s;" % row['LiftID'], conn)
             source = ColumnDataSource(df)
-            p.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-            p.scatter(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
+            weight_plot.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
+            weight_plot.scatter(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
+            volume_plot.line(x='Date', y='Volume', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
+            volume_plot.scatter(x='Date', y='Volume', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
 
-    hover = HoverTool(tooltips=[
+    weight_hover = HoverTool(tooltips=[
         ("Date", "@Date{%F}"),
         ("Lift", "@Name"),
         ("Weight", "@Weight"),
         ("Reps", "(@Reps1, @Reps2, @Reps3)")
     ], formatters={"Date": "datetime"})
+    volume_hover = HoverTool(tooltips=[
+        ("Date", "@Date{%F}"),
+        ("Lift", "@Name"),
+        ("Volume", "@Volume"),
+        ("Weight", "@Weight"),
+        ("Reps", "(@Reps1, @Reps2, @Reps3)")
+    ], formatters={"Date": "datetime"})
+    grid = gridplot([[weight_plot], [volume_plot]], sizing_mode='scale_width')
+    weight_plot.add_tools(weight_hover)
+    weight_plot.legend.location = 'top_left'
+    weight_plot.legend.label_text_font_size = "8px"
+    volume_plot.add_tools(volume_hover)
+    volume_plot.legend.location = 'top_left'
+    volume_plot.legend.label_text_font_size = "8px"
 
-    p.add_tools(hover)
-    p.legend.location = 'top_left'
-    p.legend.label_text_font_size = "8px"
-
-    script, div = components(p)
+    script, div = components(grid)
     return flask.render_template("stats.html", bokeh_script=script, bokeh_div=div)
 
 

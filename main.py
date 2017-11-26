@@ -69,8 +69,10 @@ def create_tables_if_not_exist():
             "AsymmetryMultiplier INTEGER DEFAULT 1, "
             "UNIQUE(Name), "
             "CHECK (VolumeMultiplier IN (1, 2) and AsymmetryMultiplier IN (1, 2)))")
-        cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
-                           [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name) for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
+        cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) "
+                           "SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
+                           [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name)
+                            for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
         cursor.execute(
             "CREATE TABLE IF NOT EXISTS Workouts (WorkoutID INTEGER PRIMARY KEY, Name TEXT NOT NULL, UNIQUE(Name))")
         cursor.executemany(
@@ -331,7 +333,7 @@ def show_basic():
 def send_stats():
 
     # create a new plot with a title and axis labels
-    p = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', width=800, height=900)
+    p = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', sizing_mode='scale_width')
     with sqlite3.connect(os.path.join('data', 'userdata.db'),
                          detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
@@ -341,7 +343,7 @@ def send_stats():
                 "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
                 "WHERE LiftFK = %s;" % row['LiftID'], conn)
             source = ColumnDataSource(df)
-            p.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=row['Name'])
+            p.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
             p.scatter(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
 
     hover = HoverTool(tooltips=[
@@ -353,6 +355,7 @@ def send_stats():
 
     p.add_tools(hover)
     p.legend.location = 'top_left'
+    p.legend.label_text_font_size = "8px"
 
     script, div = components(p)
     return flask.render_template("stats.html", bokeh_script=script, bokeh_div=div)

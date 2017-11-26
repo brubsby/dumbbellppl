@@ -22,7 +22,16 @@
         </li>
     </ul>
 </nav>
-    {{ bokeh_div|safe }}
+<div class="container" style="margin-top: 100px;">
+    <div class="card">
+        <div class="card-header">
+            Graphs
+        </div>
+        <div class="card-body">
+            {{ bokeh_div|safe }}
+        </div>
+    </div>
+</div>
     <script src="http://cdn.pydata.org/bokeh/release/bokeh-0.12.10.min.js"></script>
     <script src="http://cdn.pydata.org/bokeh/release/bokeh-widgets-0.12.10.min.js"></script>
     {{ bokeh_script|safe }}
@@ -32,5 +41,11 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ" crossorigin="anonymous"></script>
 <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.9/jquery.validate.min.js"></script>
+<!--Send resize event to have bokeh fit into page properly-->
+<script>
+    $('.bk-plot-wrapper').ready(function() {
+        window.dispatchEvent(new Event('resize'));
+    });
+</script>
 </body>
 </html>

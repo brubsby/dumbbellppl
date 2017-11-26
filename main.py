@@ -6,6 +6,7 @@ import colander
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
+from bokeh.models import HoverTool, ColumnDataSource
 import pandas
 
 import os
@@ -302,14 +303,26 @@ def send_stats():
 
     # create a new plot with a title and axis labels
     p = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', width=800, height=900)
-
     with sqlite3.connect(os.path.join('data', 'userdata.db'),
                          detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
         for name, row in lifts_df.iterrows():
-            df = pandas.read_sql_query("SELECT Date, Weight FROM LiftHistory WHERE LiftFK = %s;" % row['LiftID'], conn)
-            p.line(df['Date'], df['Weight'], color=Category20[20][row['LiftID'] % 20], legend=row['Name'])
+            df = pandas.read_sql_query(
+                "SELECT Name, Date, Weight, Reps1, Reps2, Reps3 "
+                "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
+                "WHERE LiftFK = %s;" % row['LiftID'], conn)
+            source = ColumnDataSource(df)
+            p.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=row['Name'])
+            p.scatter(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
 
+    hover = HoverTool(tooltips=[
+        ("Date", "@Date{%F}"),
+        ("Lift", "@Name"),
+        ("Weight", "@Weight"),
+        ("Reps", "(@Reps1, @Reps2, @Reps3)")
+    ], formatters={"Date": "datetime"})
+
+    p.add_tools(hover)
     p.legend.location = 'top_left'
 
     script, div = components(p)

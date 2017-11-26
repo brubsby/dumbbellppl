@@ -3,6 +3,11 @@ import sqlite3
 import itertools
 import datetime
 import colander
+from bokeh.plotting import figure
+from bokeh.embed import components
+from bokeh.models import sources
+from bokeh.palettes import Category20
+import pandas
 
 import os
 
@@ -183,20 +188,24 @@ def get_new_workout_data(conn):
             lift_data.append(lift_dict)
             continue
         lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
+        # if last lifts reps were all greater than or equal to 12, increase weight if possible
         if data[0][1] >= 12 and data[0][2] >= 12 and data[0][3] >= 12:
             lift_dict["weight"] = \
                 AVAILABLE_WEIGHTS[min(AVAILABLE_WEIGHTS.index(data[0][0]) + 1, len(AVAILABLE_WEIGHTS) - 1)]
             lift_data.append(lift_dict)
             continue
-        if len(data) >= 2:
+        # if this lift has been performed at least twice and the weight hadn't increased for the last workout
+        if len(data) >= 2 and data[0][0] <= data[1][0]:
             rep_total_list = []
             for i in range(2):
                 rep_total_list.append(data[i][1] + data[i][2] + data[i][3])
+            # if the number of total reps decreased since the last workout, decrease weight
             if rep_total_list[0] < rep_total_list[1]:
                 lift_dict["weight"] = \
                          AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
                 lift_data.append(lift_dict)
                 continue
+        # if the workouts have been exactly the same reps and weights for 3 iterations, lower weight
         if len(data) >= 3 and data[0] == data[1] == data[2]:
             lift_dict["weight"] = \
                 AVAILABLE_WEIGHTS[max(AVAILABLE_WEIGHTS.index(data[0][0]) - 1, 0)]
@@ -287,6 +296,25 @@ def show_basic():
                 return flask.render_template("index.html", **kwargs)
         else:
             return flask.render_template("index.html", **kwargs)
+
+
+@app.route('/stats')
+def send_stats():
+
+    # create a new plot with a title and axis labels
+    p = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', width=800, height=900)
+
+    with sqlite3.connect(os.path.join('data', 'userdata.db'),
+                         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
+        for name, row in lifts_df.iterrows():
+            df = pandas.read_sql_query("SELECT Date, Weight FROM LiftHistory WHERE LiftFK = %s;" % row['LiftID'], conn)
+            p.line(df['Date'], df['Weight'], color=Category20[20][row['LiftID'] % 20], legend=row['Name'])
+
+    p.legend.location = 'top_left'
+
+    script, div = components(p)
+    return flask.render_template("stats.html", bokeh_script=script, bokeh_div=div)
 
 
 @app.route('/static/<path:path>')

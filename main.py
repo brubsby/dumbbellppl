@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 import flask
 import sqlite3
 import itertools
@@ -11,11 +13,32 @@ import pandas
 
 import os
 
+Lift = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
+Lift.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
+
 WORKOUTS = {
-    'PUSH_LIFTS': ['Chest Press', 'Incline Fly', 'Arnold Press', 'Overhead Triceps Extension'],
-    'PULL_LIFTS': ['Pull-up', 'Bent-Over Row', 'Reverse Fly', 'Shrug', 'Bicep Curl'],
-    'LEG_LIFTS': ['Goblet Squat', 'Lunge', 'Single Leg Deadlift', 'Calf Raise'],
-    'EVERY_OTHER_LIFTS': ['Hanging Leg Raises'],
+    'PUSH_LIFTS': [
+        Lift('Chest Press'),
+        Lift('Incline Fly'),
+        Lift('Arnold Press'),
+        Lift('Overhead Triceps Extension', 1, 1)
+    ],
+    'PULL_LIFTS': [
+        Lift('Pull-up', 1, 1),
+        Lift('Bent-Over Row', 1, 2),
+        Lift('Reverse Fly'),
+        Lift('Shrug'),
+        Lift('Bicep Curl')
+    ],
+    'LEG_LIFTS': [
+        Lift('Goblet Squat', 1, 1),
+        Lift('Lunge', 2, 2),
+        Lift('Single Leg Deadlift', 1, 2),
+        Lift('Calf Raise')
+    ],
+    'EVERY_OTHER_LIFTS': [
+        Lift('Hanging Leg Raises', 1, 2)
+    ],
     'REST': [],
     'MISS': []
 }
@@ -39,9 +62,15 @@ def create_tables_if_not_exist():
     with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "CREATE TABLE IF NOT EXISTS Lifts (LiftID INTEGER PRIMARY KEY, Name TEXT NOT NULL, UNIQUE(Name))")
-        cursor.executemany("INSERT INTO Lifts (Name) SELECT ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
-                           [(lift, lift) for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
+            "CREATE TABLE IF NOT EXISTS Lifts ("
+            "LiftID INTEGER PRIMARY KEY, "
+            "Name TEXT NOT NULL, "
+            "VolumeMultiplier INTEGER DEFAULT 2, "
+            "AsymmetryMultiplier INTEGER DEFAULT 1, "
+            "UNIQUE(Name), "
+            "CHECK (VolumeMultiplier IN (1, 2) and AsymmetryMultiplier IN (1, 2)))")
+        cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
+                           [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name) for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
         cursor.execute(
             "CREATE TABLE IF NOT EXISTS Workouts (WorkoutID INTEGER PRIMARY KEY, Name TEXT NOT NULL, UNIQUE(Name))")
         cursor.executemany(
@@ -62,7 +91,7 @@ def create_tables_if_not_exist():
                 "WHERE NOT EXISTS("
                 "SELECT 1 FROM WorkoutContents WHERE WorkoutFK = (SELECT WorkoutID FROM Workouts WHERE Name = ?) "
                 "AND LiftFK = (SELECT LiftID FROM Lifts WHERE Name = ?));",
-                [(workout, lift, workout, lift) for lift in lift_list])
+                [(workout, lift.Name, workout, lift.Name) for lift in lift_list])
         cursor.execute(
             'CREATE TABLE IF NOT EXISTS LiftHistory ('
             'LiftHistoryID INTEGER PRIMARY KEY, '
@@ -168,7 +197,7 @@ def get_todays_workout_data(conn):
             "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
             "ORDER BY Date DESC LIMIT 1", (lift,))
         lift_row = cursor.fetchone()
-        lift_dict = {"name": lift, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
+        lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
         lift_data.append(lift_dict)
     return {"workout_id": workout, "lift_data": lift_data}
 
@@ -181,9 +210,9 @@ def get_new_workout_data(conn):
         cursor.execute(
             "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
             "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 3", (lift,))
+            "ORDER BY Date DESC LIMIT 3", (lift.Name,))
         data = cursor.fetchall()
-        lift_dict = {"name": lift, "previous_reps": []}
+        lift_dict = {"name": lift.Name, "previous_reps": []}
         if data[0][0] is None:
             lift_data.append(lift_dict)
             continue
@@ -229,7 +258,7 @@ class Lifts(colander.SequenceSchema):
 
 
 class Workout(colander.MappingSchema):
-    workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS))
+    workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
     lifts = Lifts()
 
 
@@ -259,7 +288,7 @@ def save_form_to_db(form, conn, now_date):
         for lift in WORKOUTS[form['workout-id']]:
             cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
                            "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
-                           (lift, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
+                           (lift.Name, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
             i += 1
         cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
                        "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",

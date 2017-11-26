@@ -23,7 +23,7 @@
               <strong>Validation error!</strong> I haven't implemented front end validation so you'll have to fill out the form again.
             </div>
             {% endif %}
-            <form id="lift-reps" class="control-group" method="post" action="/?offset={{ request.args.get('offset','') }}">
+            <form id="lifts" class="control-group" method="post" action="/?offset={{ request.args.get('offset','') }}">
                 <input type="hidden" name="workout-id" value="{{ workout_id }}">
                 {% for lift in lift_data %}
                 {% set outer_loop = loop %}
@@ -31,13 +31,13 @@
                     <label for="{{ outer_loop.index }}-1" class="col-sm-3 col-form-label">{{ lift['name'] }}:</label>
                     {% for i in range(3) %}
                     <div class="col-sm-2">
-                        <input type="number" class="form-control" id="{{ outer_loop.index }}-{{ loop.index }}" name="lift{{ outer_loop.index }}set{{ loop.index }}" placeholder="{{lift['previous_reps'][loop.index0]|default(12)}}">
+                        <input type="number" class="form-control reps" id="{{ outer_loop.index }}-{{ loop.index }}" name="lift{{ outer_loop.index }}set{{ loop.index }}" placeholder="{{lift['previous_reps'][loop.index0]|default(12)}}">
                     </div>
                     {% endfor %}
                     <div class="col-sm-3">
                         <div class="input-group">
                             {% if 'weight' in lift %}
-                            <input type="number" class="form-control" readonly id="weight{{ outer_loop.index }}" name="weight{{ outer_loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
+                            <input type="number" class="form-control weight" readonly id="weight{{ outer_loop.index }}" name="weight{{ outer_loop.index }}" placeholder="Weight" value="{{ lift['weight'] }}">
                             {% else %}
                             <select class="form-control" id="weight{{  outer_loop.index }}" name="weight{{  outer_loop.index }}">
                                 {% for weight in available_weights %}
@@ -50,7 +50,7 @@
                     </div>
                 </div>
                 {% endfor %}
-            <button class="btn btn-primary" form="lift-reps">Submit</button>
+            <button class="btn btn-primary" form="lifts">Submit</button>
             </form>
         </div>
     </div>
@@ -84,11 +84,38 @@
 <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ" crossorigin="anonymous"></script>
+<script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.9/jquery.validate.min.js"></script>
 {% if done %}
 <!-- Script to disable all the inputs if the workout has been completed, needs to be after jquery import -->
 <script>
     $(":input").attr("disabled", true).each(function(ev) {if(!$(this).val()) {$(this).val($(this).attr("placeholder"));}});
 </script>
 {% endif %}
+<!--Script to start timer on rep change-->
+<script>
+    $( document ).ready(function() {
+        $('.reps').on('keyup', function(e){
+            if ((e.keyCode >= 48 && e.keyCode <= 57) || (e.keyCode >= 96 && e.keyCode <= 105)) {
+                // 0-9 only
+                startTimer();
+            }
+        });
+    });
+</script>
+<script>
+    $("#lifts").validate({
+        errorClass: "error is-invalid",
+        validClass: "valid is-valid",
+        errorPlacement: function(error, element) { }
+    });
+    jQuery.validator.addClassRules("reps", {
+        required: true,
+        min: 0,
+        max: 100
+    });
+    jQuery.validator.addClassRules("weight", {
+        required: true
+    });
+</script>
 </body>
 </html>

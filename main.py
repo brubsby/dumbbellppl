@@ -332,45 +332,50 @@ def show_basic():
 
 @app.route('/stats')
 def send_stats():
-
-    # create a new plot with a title and axis labels
-    weight_plot = figure(title="Dumbbell Weight Per Lift Over Time", x_axis_label='Date', y_axis_label='Weight', x_axis_type='datetime', sizing_mode='scale_width')
-    volume_plot = figure(title="Volume Per Lift Over Time", x_axis_label='Date', y_axis_label='Volume', x_axis_type='datetime', sizing_mode='scale_width')
+    LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
+    line_scatters = [
+        LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "Weight"),
+        LineScatter("Volume Per Lift Over Time", "Volume", "Volume"),
+        LineScatter("Predicted 1RM Per Lift Over Time", "1RM", "Predicted1RM")
+    ]
+    # create plots
+    plots = []
+    for line_scatter in line_scatters:
+        plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label, x_axis_type='datetime', sizing_mode='scale_width'))
     with sqlite3.connect(os.path.join('data', 'userdata.db'),
                          detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
         for name, row in lifts_df.iterrows():
             df = pandas.read_sql_query(
-                "SELECT Name, Date, Weight, Reps1, Reps2, Reps3, VolumeMultiplier, AsymmetryMultiplier, "
-                "(Weight * (Reps1 + Reps2 + Reps3) * VolumeMultiplier * AsymmetryMultiplier) as Volume "
+                "SELECT LiftHistoryID, Name, Date, Weight, Reps1, Reps2, Reps3, VolumeMultiplier, AsymmetryMultiplier, "
+                "(Weight * (Reps1 + Reps2 + Reps3) * VolumeMultiplier * AsymmetryMultiplier) as Volume, "
+                "(cast(round(Weight / (1.0278 - 0.0278 * max(Reps1, Reps2, Reps3))) as int)) as Predicted1RM "
                 "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
-                "WHERE LiftFK = %s;" % row['LiftID'], conn)
+                "WHERE LiftFK = %s;" % row['LiftID'], conn, "LiftHistoryID")
             source = ColumnDataSource(df)
-            weight_plot.line(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-            weight_plot.scatter(x='Date', y='Weight', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
-            volume_plot.line(x='Date', y='Volume', source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-            volume_plot.scatter(x='Date', y='Volume', source=source, color=Category20[20][row['LiftID'] % 20], size=7)
+            for line_scatter, plot in zip(line_scatters, plots):
+                plot.line(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
+                plot.scatter(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20], size=7)
 
-    weight_hover = HoverTool(tooltips=[
+    default_tooltips = [
         ("Date", "@Date{%F}"),
         ("Lift", "@Name"),
         ("Weight", "@Weight"),
         ("Reps", "(@Reps1, @Reps2, @Reps3)")
-    ], formatters={"Date": "datetime"})
-    volume_hover = HoverTool(tooltips=[
-        ("Date", "@Date{%F}"),
-        ("Lift", "@Name"),
-        ("Volume", "@Volume"),
-        ("Weight", "@Weight"),
-        ("Reps", "(@Reps1, @Reps2, @Reps3)")
-    ], formatters={"Date": "datetime"})
-    grid = gridplot([[weight_plot], [volume_plot]], sizing_mode='scale_width')
-    weight_plot.add_tools(weight_hover)
-    weight_plot.legend.location = 'top_left'
-    weight_plot.legend.label_text_font_size = "8px"
-    volume_plot.add_tools(volume_hover)
-    volume_plot.legend.location = 'top_left'
-    volume_plot.legend.label_text_font_size = "8px"
+    ]
+    hovers = []
+    for line_scatter in line_scatters:
+        y_tooltip = (line_scatter.y_axis_label, "@%s" % line_scatter.column)
+        if y_tooltip not in default_tooltips:
+            tooltips = default_tooltips[:2] + [y_tooltip] + default_tooltips[2:]
+        else:
+            tooltips = default_tooltips
+        hovers.append(HoverTool(tooltips=tooltips, formatters={"Date": "datetime"}))
+    for plot, hover in zip(plots, hovers):
+        plot.add_tools(hover)
+        plot.legend.location = 'top_left'
+        plot.legend.label_text_font_size = "8px"
+    grid = gridplot([[plot] for plot in plots], sizing_mode='scale_width')
 
     script, div = components(grid)
     return flask.render_template("stats.html", bokeh_script=script, bokeh_div=div)

@@ -198,7 +198,7 @@ def get_todays_workout_data(conn):
         cursor.execute(
             "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
             "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 1", (lift,))
+            "ORDER BY Date DESC LIMIT 1", (lift.Name,))
         lift_row = cursor.fetchone()
         lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
         lift_data.append(lift_dict)

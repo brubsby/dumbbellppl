@@ -129,7 +129,7 @@
     window.onbeforeunload = function() {
         var dirty = false;
         $("input:visible").each(function() {
-            if(!$(this).prop('readonly') && $(this).val() !== "") {
+            if(!$(this).prop('readonly') && !$(this).prop('disabled') && $(this).val() !== "") {
                 dirty = true;
             }
         });

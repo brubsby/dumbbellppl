@@ -433,7 +433,7 @@ def get_lifting_plots(conn):
 def get_bodyweight_plot(conn=None):
     with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory;", conn,
+        bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
                                                parse_dates=["Datetime"])
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',

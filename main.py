@@ -381,8 +381,7 @@ def show_bodyweight_tracking():
             return flask.render_template("bodyweight.html", **kwargs)
 
 
-@app.route('/stats')
-def show_stats():
+def get_lifting_plots(conn):
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
         LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "Weight"),
@@ -392,9 +391,10 @@ def show_stats():
     # create plots
     plots = []
     for line_scatter in line_scatters:
-        plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label, x_axis_type='datetime', sizing_mode='scale_width'))
-    with sqlite3.connect(os.path.join('data', 'userdata.db'),
-                         detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
+                            x_axis_type='datetime', sizing_mode='scale_width'))
+    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
         for name, row in lifts_df.iterrows():
             df = pandas.read_sql_query(
@@ -405,8 +405,10 @@ def show_stats():
                 "WHERE LiftFK = %s;" % row['LiftID'], conn, "LiftHistoryID")
             source = ColumnDataSource(df)
             for line_scatter, plot in zip(line_scatters, plots):
-                plot.line(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20], legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-                plot.scatter(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20], size=7)
+                plot.line(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
+                          legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
+                plot.scatter(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
+                             size=7)
 
     default_tooltips = [
         ("Date", "@Date{%F}"),
@@ -426,10 +428,37 @@ def show_stats():
         plot.add_tools(hover)
         plot.legend.location = 'top_left'
         plot.legend.label_text_font_size = "8px"
-    grid = gridplot([[plot] for plot in plots], sizing_mode='scale_width')
+    return plots
 
-    script, div = components(grid)
-    return flask.render_template("stats.html", bokeh_script=script, bokeh_div=div)
+def get_bodyweight_plot(conn=None):
+    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory;", conn,
+                                               parse_dates=["Datetime"])
+    source = ColumnDataSource(bodyweights_df)
+    bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
+                             x_axis_type='datetime', sizing_mode='scale_width')
+    bodyweight_plot.line(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0])
+    bodyweight_plot.scatter(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0], size=7)
+    bodyweight_plot.add_tools(HoverTool(tooltips=[
+        ("Bodyweight", "@Bodyweight"),
+        ("Datetime", "@Datetime{%T %F}")
+    ], formatters={"Datetime": "datetime"}))
+    return bodyweight_plot
+
+
+@app.route('/stats')
+def show_stats(conn=None):
+    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        lifting_plots = get_lifting_plots(conn=conn)
+        lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
+        bodyweight_plot = get_bodyweight_plot(conn=conn)
+
+    lift_grid_script, lift_grid_div = components(lift_grid)
+    bodyweight_script, bodyweight_div = components(bodyweight_plot)
+    return flask.render_template("stats.html", lift_grid_script=lift_grid_script, lift_grid_div=lift_grid_div,
+                                 bodyweight_script=bodyweight_script, bodyweight_div=bodyweight_div)
 
 
 @app.route('/static/<path:path>')

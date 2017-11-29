@@ -28,16 +28,28 @@
 <div class="container" style="margin-top: 100px;">
     <div class="card">
         <div class="card-header">
-            Graphs
+            Lift Stats
         </div>
         <div class="card-body">
-            {{ bokeh_div|safe }}
+            {{ lift_grid_div|safe }}
+        </div>
+    </div>
+</div>
+<div class="container" style="margin-top: 100px;">
+    <div class="card">
+        <a name="bodyweight"></a>
+        <div class="card-header">
+            Bodyweight Stats
+        </div>
+        <div class="card-body">
+            {{ bodyweight_div|safe }}
         </div>
     </div>
 </div>
     <script src="http://cdn.pydata.org/bokeh/release/bokeh-0.12.10.min.js"></script>
     <script src="http://cdn.pydata.org/bokeh/release/bokeh-widgets-0.12.10.min.js"></script>
-    {{ bokeh_script|safe }}
+    {{ lift_grid_script|safe }}
+    {{ bodyweight_script|safe }}
 <!-- Optional JavaScript -->
 <!-- jQuery first, then Popper.js, then Bootstrap JS -->
 <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>

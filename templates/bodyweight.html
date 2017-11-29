@@ -1,11 +1,9 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Dumbbell PPL Stats</title>
-    <link href="http://cdn.pydata.org/bokeh/release/bokeh-0.12.10.min.css" rel="stylesheet">
-    <link href="http://cdn.pydata.org/bokeh/release/bokeh-widgets-0.12.10.min.css" rel="stylesheet">
+    <title>Dumbbell Push Pull Legs</title>
     <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/css/bootstrap.min.css" integrity="sha384-PsH8R72JQ3SOdhVi3uxftmaW6Vc51MKb0q5P2rRUpPvrszuE4W1povHYgTpBfshb" crossorigin="anonymous">
     <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}">
@@ -17,37 +15,59 @@
         <li class="nav-item">
             <a class="nav-link" href="/">Today</a>
         </li>
-        <li class="nav-item active">
-            <a class="nav-link" href="/stats">Stats <span class="sr-only">(current)</span></a>
-        </li>
         <li class="nav-item">
-            <a class="nav-link" href="/bodyweight">Weight</a>
+            <a class="nav-link" href="/stats">Stats</a>
+        </li>
+        <li class="nav-item active">
+            <a class="nav-link" href="/bodyweight">Weight <span class="sr-only">(current)</span></a>
         </li>
     </ul>
 </nav>
 <div class="container" style="margin-top: 100px;">
     <div class="card">
         <div class="card-header">
-            Graphs
+        Bodyweight Tracking
         </div>
         <div class="card-body">
-            {{ bokeh_div|safe }}
+            {% if fail_validation %}
+            <div class="alert alert-danger" role="alert">
+              <strong>Validation error!</strong> I haven't implemented front end validation so you'll have to fill out the form again.
+            </div>
+            {% endif %}
+            <form id="bodyweight-form" class="control-group" method="post" action="/bodyweight?offset={{ request.args.get('offset','') }}">
+                <div class="form-group row">
+                    <label for="bodyweight" class="col-sm-6 col-form-label">Enter current bodyweight:</label>
+                    <div class="col-sm-6">
+                        <div class="input-group">
+                        <input type="number" class="form-control" id="bodyweight" name="bodyweight" placeholder="{{previous_bodyweight|default('Bodyweight')}}">
+                        <span class="input-group-addon">{{ unit }}</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-primary" form="bodyweight-form">Submit</button>
+            </form>
         </div>
     </div>
 </div>
-    <script src="http://cdn.pydata.org/bokeh/release/bokeh-0.12.10.min.js"></script>
-    <script src="http://cdn.pydata.org/bokeh/release/bokeh-widgets-0.12.10.min.js"></script>
-    {{ bokeh_script|safe }}
+
 <!-- Optional JavaScript -->
+<!-- my javascript-->
+<script src="{{ url_for('static', filename='js/index.js') }}"></script>
 <!-- jQuery first, then Popper.js, then Bootstrap JS -->
 <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta.2/js/bootstrap.min.js" integrity="sha384-alpBpkh1PFOepccYVYDB4do5UnbKysX5WZXm3XxPqe5iKTfUKjNkCk9SaVuEZflJ" crossorigin="anonymous"></script>
 <script src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.9/jquery.validate.min.js"></script>
-<!--Send resize event to have bokeh fit into page properly-->
 <script>
-    $('.bk-plot-wrapper').ready(function() {
-        window.dispatchEvent(new Event('resize'));
+    $("#bodyweight-form").validate({
+        errorClass: "error is-invalid",
+        validClass: "valid is-valid",
+        errorPlacement: function(error, element) { }
+    });
+    $("#bodyweight").rules("bodyweight", {
+        required: true,
+        min: 0,
+        max: 500
     });
 </script>
 </body>

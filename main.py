@@ -1,3 +1,4 @@
+import traceback
 from collections import namedtuple
 
 import flask
@@ -111,6 +112,11 @@ def create_tables_if_not_exist():
             'WorkoutFK INTEGER NOT NULL, '
             'Date DATE NOT NULL, '
             'FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID));')
+        cursor.execute(
+            'CREATE TABLE IF NOT EXISTS BodyweightHistory ('
+            'BodyweightHistoryID INTEGER PRIMARY KEY, '
+            'Bodyweight REAL NOT NULL, '
+            'Datetime DATETIME NOT NULL);')
 
 
 def is_todays_workout_done(conn, now_date):
@@ -158,6 +164,16 @@ def get_last_six_workouts(conn):
         "ORDER BY Date DESC LIMIT 6;")
     last_six_workouts = [tup[0] for tup in cursor.fetchall()]
     return last_six_workouts
+
+
+def get_previous_bodyweight(conn):
+    cursor = conn.cursor()
+    cursor.execute("SELECT Bodyweight FROM BodyweightHistory ORDER BY Datetime DESC LIMIT 1;")
+    previous_bodyweight_row = cursor.fetchone()
+    if previous_bodyweight_row:
+        return previous_bodyweight_row[0]
+    else:
+        return None
 
 
 def fill_rests_and_misses(conn, now_date):
@@ -265,7 +281,11 @@ class Workout(colander.MappingSchema):
     lifts = Lifts()
 
 
-def process_form(dict):
+class Bodyweight(colander.MappingSchema):
+    bodyweight = colander.SchemaNode(colander.Float(), validator=colander.Range(0, 500))
+
+
+def process_workout_form(dict):
     return_dict = {'workout_id': dict.pop('workout-id'), 'lifts': []}
     weight_format_string = 'weight%i'
     lift_index = 1
@@ -281,7 +301,7 @@ def process_form(dict):
     return return_dict
 
 
-def save_form_to_db(form, conn, now_date):
+def save_workout_form_to_db(form, conn, now_date):
     cursor = conn.cursor()
     cursor.execute("SELECT 1 FROM WorkoutHistory WHERE Date = ? LIMIT 1",
                    (now_date,))
@@ -298,6 +318,11 @@ def save_form_to_db(form, conn, now_date):
                        (form['workout-id'], now_date))
     else:
         raise colander.Invalid(None, "You aren't allowed to submit two workouts in a day")
+
+
+def save_bodyweight_form_to_db(form, conn, now):
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO BodyweightHistory(Bodyweight, Datetime) VALUES (?, ?)", (form['bodyweight'], now))
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -317,10 +342,10 @@ def show_basic():
 
         if flask.request.method == 'POST':
             schema = Workout()
-            form_dict = process_form(flask.request.form.to_dict())
+            form_dict = process_workout_form(flask.request.form.to_dict())
             try:
                 schema.deserialize(form_dict)
-                save_form_to_db(flask.request.form, conn, now_date)
+                save_workout_form_to_db(flask.request.form, conn, now_date)
                 kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
                 return flask.render_template("index.html", **kwargs)
             except colander.Invalid:
@@ -330,8 +355,34 @@ def show_basic():
             return flask.render_template("index.html", **kwargs)
 
 
+@app.route('/bodyweight', methods=['GET', 'POST'])
+def show_bodyweight_tracking():
+    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+        kwargs = {
+            'unit': "lbs"
+        }
+        now = datetime.datetime.now() + datetime.timedelta(
+            days=flask.request.args.get('offset', default=0, type=int))
+        previous_bodyweight = get_previous_bodyweight(conn)
+        if previous_bodyweight:
+            kwargs['previous_bodyweight'] = previous_bodyweight
+        if flask.request.method == 'POST':
+            schema = Bodyweight()
+            form_dict = flask.request.form.to_dict()
+            try:
+                schema.deserialize(form_dict)
+                save_bodyweight_form_to_db(flask.request.form, conn, now)
+                return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
+            except colander.Invalid:
+                print(traceback.format_exc())
+                kwargs['fail_validation'] = True
+                return flask.render_template("bodyweight.html", **kwargs)
+        else:
+            return flask.render_template("bodyweight.html", **kwargs)
+
+
 @app.route('/stats')
-def send_stats():
+def show_stats():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
         LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "Weight"),

@@ -1,4 +1,4 @@
 colander
 Flask
-bokeh
+bokeh==0.12.11
 pandas

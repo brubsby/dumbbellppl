@@ -12,6 +12,7 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
+import flask_sqlalchemy
 
 import os
 
@@ -57,11 +58,14 @@ DAY_WORKOUT_DICT = {
     6: 'LEG_LIFTS'
 }
 app = flask.Flask(__name__)
+DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'userdata.db')
+DB_URI = 'sqlite:///{}'.format(DB_PATH)
+app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 
 
 def create_tables_if_not_exist():
     os.makedirs(os.path.join('data'), exist_ok=True)
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         cursor = conn.cursor()
         cursor.execute(
             "CREATE TABLE IF NOT EXISTS Lifts ("
@@ -327,7 +331,7 @@ def save_bodyweight_form_to_db(form, conn, now):
 
 @app.route('/', methods=['GET', 'POST'])
 def show_basic():
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         kwargs = {
             'unit': "lbs",
             'available_weights': AVAILABLE_WEIGHTS
@@ -357,7 +361,7 @@ def show_basic():
 
 @app.route('/bodyweight', methods=['GET', 'POST'])
 def show_bodyweight_tracking():
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
+    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         kwargs = {
             'unit': "lbs"
         }
@@ -393,7 +397,7 @@ def get_lifting_plots(conn):
     for line_scatter in line_scatters:
         plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
                             x_axis_type='datetime', sizing_mode='scale_width'))
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+    with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
         for name, row in lifts_df.iterrows():
@@ -431,7 +435,7 @@ def get_lifting_plots(conn):
     return plots
 
 def get_bodyweight_plot(conn=None):
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+    with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
                                                parse_dates=["Datetime"])
@@ -449,7 +453,7 @@ def get_bodyweight_plot(conn=None):
 
 @app.route('/stats')
 def show_stats(conn=None):
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
+    with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         lifting_plots = get_lifting_plots(conn=conn)
         lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')

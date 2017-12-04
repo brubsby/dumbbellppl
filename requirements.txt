@@ -2,3 +2,5 @@ colander
 Flask
 bokeh==0.12.11
 pandas
+sqlalchemy
+flask_sqlalchemy

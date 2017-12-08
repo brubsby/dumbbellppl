@@ -6,6 +6,7 @@ import sqlite3
 import itertools
 import datetime
 import colander
+import math
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
@@ -174,6 +175,30 @@ def get_previous_bodyweight(conn):
         return previous_bodyweight_row[0]
     else:
         return None
+
+
+def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, tau):
+    nhema_series = pandas.Series()
+    kwargs = {}
+    for i, row in enumerate(dataframe.itertuples()):
+        value = getattr(row, column_name)
+        kwargs['timestamp'] = getattr(row, datetime_column_name).timestamp()
+        average = non_homogeneous_exponential_moving_average(value, tau, **kwargs)
+        nhema_series.set_value(i, average)
+        kwargs['last_value'] = value
+        kwargs['last_timestamp'] = kwargs['timestamp']
+        kwargs['last_average'] = average
+    dataframe[column_name + 'nhema'] = nhema_series.values
+
+
+def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None, timestamp=None):
+    if any(x is None for x in [last_average, last_timestamp, last_value, timestamp]):
+        return value
+    alpha = (timestamp - last_timestamp) / float(tau)
+    mu = math.exp(-alpha)
+    v = (1 - mu) / alpha
+    average = mu * last_average + (1 - mu) * value + (mu - v) * (value - last_value)
+    return average
 
 
 def fill_rests_and_misses(conn, now_date):
@@ -430,18 +455,21 @@ def get_lifting_plots(conn):
         plot.legend.label_text_font_size = "8px"
     return plots
 
+
 def get_bodyweight_plot(conn=None):
     with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
                                                parse_dates=["Datetime"])
+    add_nhema_column_to_dataframe(bodyweights_df, 'Datetime', 'Bodyweight', 288000)
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
-    bodyweight_plot.line(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0])
+    bodyweight_plot.line(x='Datetime', y='Bodyweightnhema', source=source, color=Category20[20][0])
     bodyweight_plot.scatter(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0], size=7)
     bodyweight_plot.add_tools(HoverTool(tooltips=[
         ("Bodyweight", "@Bodyweight"),
+        ("BodyweightEMA", "@Bodyweightnhema"),
         ("Datetime", "@Datetime{%T %F}")
     ], formatters={"Datetime": "datetime"}))
     return bodyweight_plot

@@ -13,6 +13,7 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
+from generated_schema import db
 import flask_sqlalchemy
 
 import os
@@ -60,12 +61,17 @@ DAY_WORKOUT_DICT = {
 }
 app = flask.Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'userdata.db')
-DB_URI = 'sqlite:///{}'.format(DB_PATH)
+TEST_DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'testuserdata.db')
+# os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
+DB_URI = 'sqlite:///{}'.format(TEST_DB_PATH)
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
+db.init_app(app)
 
 
 def create_tables_if_not_exist():
     os.makedirs(os.path.join('data'), exist_ok=True)
+    with app.app_context():
+        db.create_all()
     with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         cursor = conn.cursor()
         cursor.execute(

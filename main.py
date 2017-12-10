@@ -61,44 +61,24 @@ DAY_WORKOUT_DICT = {
 }
 app = flask.Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'userdata.db')
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'testuserdata.db')
-# os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
-DB_URI = 'sqlite:///{}'.format(TEST_DB_PATH)
+os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
+DB_URI = 'sqlite:///{}'.format(DB_PATH)
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 db.init_app(app)
 
 
 def create_tables_if_not_exist():
-    os.makedirs(os.path.join('data'), exist_ok=True)
     with app.app_context():
         db.create_all()
     with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS Lifts ("
-            "LiftID INTEGER PRIMARY KEY, "
-            "Name TEXT NOT NULL, "
-            "VolumeMultiplier INTEGER DEFAULT 2, "
-            "AsymmetryMultiplier INTEGER DEFAULT 1, "
-            "UNIQUE(Name), "
-            "CHECK (VolumeMultiplier IN (1, 2) and AsymmetryMultiplier IN (1, 2)))")
         cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) "
                            "SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
                            [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name)
                             for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS Workouts (WorkoutID INTEGER PRIMARY KEY, Name TEXT NOT NULL, UNIQUE(Name))")
         cursor.executemany(
             "INSERT INTO Workouts (Name) SELECT ? WHERE NOT EXISTS(SELECT 1 FROM Workouts WHERE Name = ?);",
             [(lift_day, lift_day) for lift_day in WORKOUTS.keys()])
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS WorkoutContents ("
-            "WorkoutContentID INTEGER PRIMARY KEY, "
-            'WorkoutFK INTEGER NOT NULL, '
-            'LiftFK INTEGER NOT NULL, '
-            "FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID), "
-            "FOREIGN KEY (LiftFK) REFERENCES Lifts(LiftID), "
-            "UNIQUE(WorkoutFK, LiftFK));")
         for workout, lift_list in WORKOUTS.items():
             cursor.executemany(
                 "INSERT INTO WorkoutContents (WorkoutFK, LiftFK) "
@@ -107,27 +87,6 @@ def create_tables_if_not_exist():
                 "SELECT 1 FROM WorkoutContents WHERE WorkoutFK = (SELECT WorkoutID FROM Workouts WHERE Name = ?) "
                 "AND LiftFK = (SELECT LiftID FROM Lifts WHERE Name = ?));",
                 [(workout, lift.Name, workout, lift.Name) for lift in lift_list])
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS LiftHistory ('
-            'LiftHistoryID INTEGER PRIMARY KEY, '
-            'LiftFK INTEGER NOT NULL, '
-            'Reps1 INTEGER NOT NULL, '
-            'Reps2 INTEGER NOT NULL, '
-            'Reps3 INTEGER NOT NULL, '
-            'Weight NUMBER NOT NULL, '
-            'Date DATE NOT NULL, '
-            'FOREIGN KEY (LiftFK) REFERENCES Lifts(LiftID));')
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS WorkoutHistory ('
-            'WorkoutHistoryID INTEGER PRIMARY KEY, '
-            'WorkoutFK INTEGER NOT NULL, '
-            'Date DATE NOT NULL, '
-            'FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID));')
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS BodyweightHistory ('
-            'BodyweightHistoryID INTEGER PRIMARY KEY, '
-            'Bodyweight REAL NOT NULL, '
-            'Datetime DATETIME NOT NULL);')
 
 
 def is_todays_workout_done(conn, now_date):

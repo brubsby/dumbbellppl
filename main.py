@@ -90,7 +90,7 @@ def create_tables_if_not_exist():
             "WorkoutContentID INTEGER PRIMARY KEY, "
             'WorkoutFK INTEGER NOT NULL, '
             'LiftFK INTEGER NOT NULL, '
-            "FOREIGN KEY (WorkoutFK) REFERENCES Lifts(WorkoutID), "
+            "FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID), "
             "FOREIGN KEY (LiftFK) REFERENCES Lifts(LiftID), "
             "UNIQUE(WorkoutFK, LiftFK));")
         for workout, lift_list in WORKOUTS.items():

@@ -67,6 +67,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 db.init_app(app)
 
 
+@app.before_first_request
 def create_tables_if_not_exist():
     with app.app_context():
         db.create_all()
@@ -470,7 +471,6 @@ def favicon():
 
 
 if __name__ == '__main__':
-    create_tables_if_not_exist()
     app.run(host='127.0.0.1', port=8080)
 
 

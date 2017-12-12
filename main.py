@@ -1,5 +1,5 @@
 import traceback
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 import flask
 import sqlite3
@@ -13,40 +13,40 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
-from generated_schema import db
+from generated_schema import db, Lift, WorkoutContent, Workout
 import flask_sqlalchemy
 
 import os
 
-Lift = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
-Lift.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
+LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
+LiftTuple.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
 
-WORKOUTS = {
+WORKOUTS = OrderedDict(sorted({
     'PUSH_LIFTS': [
-        Lift('Chest Press'),
-        Lift('Incline Fly'),
-        Lift('Arnold Press'),
-        Lift('Overhead Triceps Extension', 1, 1)
+        LiftTuple('Chest Press'),
+        LiftTuple('Incline Fly'),
+        LiftTuple('Arnold Press'),
+        LiftTuple('Overhead Triceps Extension', 1, 1)
     ],
     'PULL_LIFTS': [
-        Lift('Pull-up', 1, 1),
-        Lift('Bent-Over Row', 1, 2),
-        Lift('Reverse Fly'),
-        Lift('Shrug'),
-        Lift('Bicep Curl')
+        LiftTuple('Pull-up', 1, 1),
+        LiftTuple('Bent-Over Row', 1, 2),
+        LiftTuple('Reverse Fly'),
+        LiftTuple('Shrug'),
+        LiftTuple('Bicep Curl')
     ],
     'LEG_LIFTS': [
-        Lift('Goblet Squat', 1, 1),
-        Lift('Lunge', 2, 2),
-        Lift('Single Leg Deadlift', 1, 2),
-        Lift('Calf Raise')
+        LiftTuple('Goblet Squat', 1, 1),
+        LiftTuple('Lunge', 2, 2),
+        LiftTuple('Single Leg Deadlift', 1, 2),
+        LiftTuple('Calf Raise')
     ],
     'EVERY_OTHER_LIFTS': [
-        Lift('Hanging Leg Raises', 1, 2)
+        LiftTuple('Hanging Leg Raises', 1, 2)
     ],
     'REST': [],
     'MISS': []
-}
+}.items()))
 
 AVAILABLE_WEIGHTS = [0, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 30, 35, 40, 45, 50, 52.5]
 
@@ -68,26 +68,46 @@ db.init_app(app)
 
 
 @app.before_first_request
-def create_tables_if_not_exist():
-    with app.app_context():
-        db.create_all()
-    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        cursor = conn.cursor()
-        cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) "
-                           "SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
-                           [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name)
-                            for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
-        cursor.executemany(
-            "INSERT INTO Workouts (Name) SELECT ? WHERE NOT EXISTS(SELECT 1 FROM Workouts WHERE Name = ?);",
-            [(lift_day, lift_day) for lift_day in WORKOUTS.keys()])
-        for workout, lift_list in WORKOUTS.items():
-            cursor.executemany(
-                "INSERT INTO WorkoutContents (WorkoutFK, LiftFK) "
-                "SELECT (SELECT WorkoutID FROM Workouts WHERE Name = ?), (SELECT LiftID FROM Lifts WHERE Name = ?) "
-                "WHERE NOT EXISTS("
-                "SELECT 1 FROM WorkoutContents WHERE WorkoutFK = (SELECT WorkoutID FROM Workouts WHERE Name = ?) "
-                "AND LiftFK = (SELECT LiftID FROM Lifts WHERE Name = ?));",
-                [(workout, lift.Name, workout, lift.Name) for lift in lift_list])
+def initialize_db():
+    # create tables
+    db.create_all()
+
+    # add lifts
+    lifts = [
+        Lift(
+            Name=lift.Name,
+            VolumeMultiplier=lift.VolumeMultiplier,
+            AsymmetryMultiplier=lift.AsymmetryMultiplier)
+        for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))
+    ]
+    for lift in lifts:
+        if not Lift.query.filter(Lift.Name == lift.Name).count():
+            db.session.add(lift)
+
+    # add workouts
+    workouts = [Workout(
+            Name=workout)
+        for workout in WORKOUTS.keys()
+    ]
+    for workout in workouts:
+        if not Workout.query.filter(Workout.Name == workout.Name).count():
+            db.session.add(workout)
+
+    # add the contents of the workouts
+    for workout_name, lift_list in WORKOUTS.items():
+        workout_id_query = db.session.query(Workout.WorkoutID).filter(Workout.Name == workout_name)
+        for lift in lift_list:
+            lift_id_query = db.session.query(Lift.LiftID).filter(Lift.Name == lift.Name)
+            workout_content_query = WorkoutContent.query.filter(
+                WorkoutContent.WorkoutFK == workout_id_query.subquery().c.WorkoutID,
+                WorkoutContent.LiftFK == lift_id_query.subquery().c.LiftID
+            )
+            if not workout_content_query.count():
+                workout_content = WorkoutContent(WorkoutFK=workout_id_query.first()[0],
+                                                 LiftFK=lift_id_query.first()[0])
+                db.session.add(workout_content)
+
+    db.session.commit()
 
 
 def is_todays_workout_done(conn, now_date):
@@ -260,23 +280,23 @@ def get_new_workout_data(conn):
     return {"workout_id": workout, "lift_data": lift_data}
 
 
-class Lift(colander.MappingSchema):
+class LiftColander(colander.MappingSchema):
     set_1_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
 
 
-class Lifts(colander.SequenceSchema):
-    lifts = Lift()
+class LiftsColander(colander.SequenceSchema):
+    lifts = LiftColander()
 
 
-class Workout(colander.MappingSchema):
+class WorkoutColander(colander.MappingSchema):
     workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
-    lifts = Lifts()
+    lifts = LiftsColander()
 
 
-class Bodyweight(colander.MappingSchema):
+class BodyweightColander(colander.MappingSchema):
     bodyweight = colander.SchemaNode(colander.Float(), validator=colander.Range(0, 500))
 
 
@@ -336,7 +356,7 @@ def show_basic():
             kwargs = {**kwargs, **get_new_workout_data(conn)}
 
         if flask.request.method == 'POST':
-            schema = Workout()
+            schema = WorkoutColander()
             form_dict = process_workout_form(flask.request.form.to_dict())
             try:
                 schema.deserialize(form_dict)
@@ -362,7 +382,7 @@ def show_bodyweight_tracking():
         if previous_bodyweight:
             kwargs['previous_bodyweight'] = previous_bodyweight
         if flask.request.method == 'POST':
-            schema = Bodyweight()
+            schema = BodyweightColander()
             form_dict = flask.request.form.to_dict()
             try:
                 schema.deserialize(form_dict)

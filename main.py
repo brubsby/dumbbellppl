@@ -13,7 +13,7 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
-from generated_schema import db, Lift, WorkoutContent, Workout
+from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 import flask_sqlalchemy
 
 import os
@@ -110,32 +110,25 @@ def initialize_db():
     db.session.commit()
 
 
-def is_todays_workout_done(conn, now_date):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    todays_workout_row = cursor.fetchone()
-    if not todays_workout_row:
+def is_todays_workout_done(now_date):
+    row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
+    if not row:
         return False
-    return todays_workout_row[0] == now_date
+    return row[0] == now_date
 
 
-def get_next_workout(conn):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    most_recent_workout_date_row = cursor.fetchone()
+def get_next_workout():
+    most_recent_workout_date_row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
     if not most_recent_workout_date_row:
         # no data, start on push
         return "PUSH_LIFTS"
-    last_six_workouts = get_last_six_workouts(conn)
+    last_six_workouts = get_last_six_workouts()
     if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
         return 'REST'
     else:
-        cursor.execute(
-            "SELECT Workouts.Name "
-            "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-            "WHERE Workouts.Name NOT IN ('REST', 'MISS')"
-            "ORDER BY Date DESC LIMIT 1;")
-        last_non_rest_or_miss_workout = cursor.fetchone()[0]
+        last_non_rest_or_miss_workout = db.session.query(Workout.Name)\
+            .filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK).filter(Workout.Name.notin_(('REST', 'MISS')))\
+            .order_by(WorkoutHistory.Date.desc()).first()[0]
         if not last_non_rest_or_miss_workout:
             return 'PUSH_LIFTS'
         if last_non_rest_or_miss_workout == 'PUSH_LIFTS':
@@ -147,22 +140,17 @@ def get_next_workout(conn):
     raise RuntimeError("Couldn't determine what workout day it is.")
 
 
-def get_last_six_workouts(conn):
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT Workouts.Name "
-        "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-        "ORDER BY Date DESC LIMIT 6;")
-    last_six_workouts = [tup[0] for tup in cursor.fetchall()]
+def get_last_six_workouts():
+    rows = db.session.query(Workout.Name).filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK).\
+        order_by(WorkoutHistory.Date.desc()).limit(6).all()
+    last_six_workouts = [tup[0] for tup in rows]
     return last_six_workouts
 
 
-def get_previous_bodyweight(conn):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Bodyweight FROM BodyweightHistory ORDER BY Datetime DESC LIMIT 1;")
-    previous_bodyweight_row = cursor.fetchone()
-    if previous_bodyweight_row:
-        return previous_bodyweight_row[0]
+def get_previous_bodyweight():
+    row = db.session.query(BodyweightHistory.Bodyweight).order_by(BodyweightHistory.Datetime.desc()).first()
+    if row:
+        return row[0]
     else:
         return None
 
@@ -181,7 +169,8 @@ def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, 
     dataframe[column_name + 'nhema'] = nhema_series.values
 
 
-def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None, timestamp=None):
+def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None,
+                                               timestamp=None):
     if any(x is None for x in [last_average, last_timestamp, last_value, timestamp]):
         return value
     alpha = (timestamp - last_timestamp) / float(tau)
@@ -191,61 +180,47 @@ def non_homogeneous_exponential_moving_average(value, tau, last_average=None, la
     return average
 
 
-def fill_rests_and_misses(conn, now_date):
+def fill_rests_and_misses(now_date):
     # if any workout days were missed, insert the misses/rests into workout history
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    most_recent_workout_date_row = cursor.fetchone()
+    most_recent_workout_date_row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
     if not most_recent_workout_date_row:
         # no workout data, return
         return
     most_recent_workout_date = most_recent_workout_date_row[0]
-    last_six_workouts = get_last_six_workouts(conn)
-    workout_date_tuple_to_add = []
+    last_six_workouts = get_last_six_workouts()
+    workout_histories_to_add = []
     iteration_date = most_recent_workout_date + datetime.timedelta(days=1)
     # rest day can only be the first day in a string of misses, can also be today
     if iteration_date <= now_date:
         if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
-            workout_date_tuple_to_add.append(('REST', iteration_date))
+            workout_histories_to_add.append(WorkoutHistory(Workout=Workout(Name='REST'), Date=iteration_date))
             iteration_date = iteration_date + datetime.timedelta(days=1)
     # fill in all days up to and including yesterday with misses, if there was no workout
     while iteration_date < now_date:
-        workout_date_tuple_to_add.append(('MISS', iteration_date))
+        workout_histories_to_add.append(WorkoutHistory(Workout=Workout(Name='MISS'), Date=iteration_date))
         iteration_date = iteration_date + datetime.timedelta(days=1)
-    cursor.executemany("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?);",
-                       (tup for tup in workout_date_tuple_to_add))
+    db.session.add_all(workout_histories_to_add)
 
 
-def get_todays_workout_data(conn):
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT Workouts.Name "
-        "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-        "ORDER BY Date DESC LIMIT 1;")
-    workout = cursor.fetchone()[0]
+def get_todays_workout_data():
+    workout = db.session.query(Workout.Name).filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK)\
+        .order_by(WorkoutHistory.Date.desc()).first()[0]
     lift_data = []
     for lift in WORKOUTS[workout]:
-        cursor.execute(
-            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
-            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 1", (lift.Name,))
-        lift_row = cursor.fetchone()
+        lift_row = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
+            .outerjoin(LiftHistory).filter(Lift.Name == lift.name).order_by(LiftHistory.Date.desc()).first()
         lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
         lift_data.append(lift_dict)
     return {"workout_id": workout, "lift_data": lift_data}
 
 
-def get_new_workout_data(conn):
-    cursor = conn.cursor()
+def get_new_workout_data():
     lift_data = []
-    workout = get_next_workout(conn)
-    for lift in WORKOUTS[workout]:
-        cursor.execute(
-            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
-            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 3", (lift.Name,))
-        data = cursor.fetchall()
+    workout = get_next_workout()
+    for lift in WORKOUTS[workout]:  # TODO change query to actually look at the database....
+        data = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
+            .filter(Lift.LiftID == LiftHistory.LiftFK).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc())\
+            .limit(3).all()
         lift_dict = {"name": lift.Name, "previous_reps": []}
         if data[0][0] is None:
             lift_data.append(lift_dict)
@@ -300,17 +275,17 @@ class BodyweightColander(colander.MappingSchema):
     bodyweight = colander.SchemaNode(colander.Float(), validator=colander.Range(0, 500))
 
 
-def process_workout_form(dict):
-    return_dict = {'workout_id': dict.pop('workout-id'), 'lifts': []}
+def process_workout_form(form_dict):
+    return_dict = {'workout_id': form_dict.pop('workout-id'), 'lifts': []}
     weight_format_string = 'weight%i'
     lift_index = 1
     while True:
-        if weight_format_string % lift_index not in dict:
+        if weight_format_string % lift_index not in form_dict:
             break
-        lift_to_add = {'dumbbell_weight': dict.pop(weight_format_string % lift_index, None)}
+        lift_to_add = {'dumbbell_weight': form_dict.pop(weight_format_string % lift_index, None)}
         for set_index in range(1, 4):
             rep_string_key = 'lift%iset%i' % (lift_index, set_index)
-            lift_to_add['set_%i_reps' % set_index] = dict.pop(rep_string_key, None)
+            lift_to_add['set_%i_reps' % set_index] = form_dict.pop(rep_string_key, None)
         return_dict['lifts'].append(lift_to_add)
         lift_index += 1
     return return_dict
@@ -326,7 +301,8 @@ def save_workout_form_to_db(form, conn, now_date):
         for lift in WORKOUTS[form['workout-id']]:
             cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
                            "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
-                           (lift.Name, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
+                           (lift.Name, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i],
+                            form['weight%i' % i], now_date))
             i += 1
         cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
                        "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",
@@ -349,11 +325,11 @@ def show_basic():
         }
         now_date = datetime.date.today() + datetime.timedelta(
             days=flask.request.args.get('offset', default=0, type=int))
-        fill_rests_and_misses(conn, now_date)
-        if is_todays_workout_done(conn, now_date):
-            kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
+        fill_rests_and_misses(now_date)
+        if is_todays_workout_done(now_date):
+            kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
         else:
-            kwargs = {**kwargs, **get_new_workout_data(conn)}
+            kwargs = {**kwargs, **get_new_workout_data()}
 
         if flask.request.method == 'POST':
             schema = WorkoutColander()
@@ -361,7 +337,7 @@ def show_basic():
             try:
                 schema.deserialize(form_dict)
                 save_workout_form_to_db(flask.request.form, conn, now_date)
-                kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
+                kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
                 return flask.render_template("index.html", **kwargs)
             except colander.Invalid:
                 kwargs['fail_validation'] = True
@@ -378,7 +354,7 @@ def show_bodyweight_tracking():
         }
         now = datetime.datetime.now() + datetime.timedelta(
             days=flask.request.args.get('offset', default=0, type=int))
-        previous_bodyweight = get_previous_bodyweight(conn)
+        previous_bodyweight = get_previous_bodyweight()
         if previous_bodyweight:
             kwargs['previous_bodyweight'] = previous_bodyweight
         if flask.request.method == 'POST':
@@ -449,8 +425,9 @@ def get_lifting_plots(conn):
 def get_bodyweight_plot(conn=None):
     with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
-                                               parse_dates=["Datetime"])
+        bodyweights_df = \
+            pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
+                                  parse_dates=["Datetime"])
     add_nhema_column_to_dataframe(bodyweights_df, 'Datetime', 'Bodyweight', 288000)
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
@@ -492,5 +469,3 @@ def favicon():
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=8080)
-
-

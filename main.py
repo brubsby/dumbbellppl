@@ -208,7 +208,7 @@ def get_todays_workout_data():
     lift_data = []
     for lift in WORKOUTS[workout]:
         lift_row = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
-            .outerjoin(LiftHistory).filter(Lift.Name == lift.name).order_by(LiftHistory.Date.desc()).first()
+            .filter(LiftHistory.LiftFK == Lift.LiftID).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc()).first()
         lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
         lift_data.append(lift_dict)
     return {"workout_id": workout, "lift_data": lift_data}

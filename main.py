@@ -13,6 +13,8 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
+from sqlalchemy import literal
+
 from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 import flask_sqlalchemy
 
@@ -193,13 +195,18 @@ def fill_rests_and_misses(now_date):
     # rest day can only be the first day in a string of misses, can also be today
     if iteration_date <= now_date:
         if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
-            workout_histories_to_add.append(WorkoutHistory(Workout=Workout(Name='REST'), Date=iteration_date))
+            workout_histories_to_add.append(WorkoutHistory(
+                Workout=db.session.query(Workout).filter(Workout.Name == 'REST').first(),
+                Date=iteration_date))
             iteration_date = iteration_date + datetime.timedelta(days=1)
     # fill in all days up to and including yesterday with misses, if there was no workout
     while iteration_date < now_date:
-        workout_histories_to_add.append(WorkoutHistory(Workout=Workout(Name='MISS'), Date=iteration_date))
+        workout_histories_to_add.append(WorkoutHistory(
+            Workout=db.session.query(Workout).filter(Workout.Name == 'MISS').first(),
+            Date=iteration_date))
         iteration_date = iteration_date + datetime.timedelta(days=1)
     db.session.add_all(workout_histories_to_add)
+    db.session.commit()
 
 
 def get_todays_workout_data():
@@ -291,29 +298,35 @@ def process_workout_form(form_dict):
     return return_dict
 
 
-def save_workout_form_to_db(form, conn, now_date):
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM WorkoutHistory WHERE Date = ? LIMIT 1",
-                   (now_date,))
-    data = cursor.fetchall()
-    if not data:
+def save_workout_form_to_db(form, now_date):
+    todays_workout_exists = db.session.query(literal(True)).filter(
+        db.session.query(WorkoutHistory).filter(WorkoutHistory.Date == now_date).exists()).scalar()
+    if not todays_workout_exists:
         i = 1
-        for lift in WORKOUTS[form['workout-id']]:
-            cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
-                           "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
-                           (lift.Name, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i],
-                            form['weight%i' % i], now_date))
+        lift_histories_to_add = []
+        for lift in WORKOUTS[form['workout-id']]:  # TODO actually get workouts from db...
+            lift_histories_to_add.append(LiftHistory(
+                Lift=db.session.query(Lift).filter(Lift.Name == lift.Name).first(),
+                Reps1=form['lift%iset1' % i],
+                Reps2=form['lift%iset2' % i],
+                Reps3=form['lift%iset3' % i],
+                Weight=form['weight%i' % i],
+                Date=now_date
+            ))
             i += 1
-        cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",
-                       (form['workout-id'], now_date))
+        db.session.add_all(lift_histories_to_add)
+        db.session.add(WorkoutHistory(
+            Workout=db.session.query(Workout).filter(Workout.Name == form['workout-id']).first(),
+            Date=now_date
+        ))
+        db.session.commit()
     else:
         raise colander.Invalid(None, "You aren't allowed to submit two workouts in a day")
 
 
-def save_bodyweight_form_to_db(form, conn, now):
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO BodyweightHistory(Bodyweight, Datetime) VALUES (?, ?)", (form['bodyweight'], now))
+def save_bodyweight_form_to_db(form, now):
+    db.session.add(BodyweightHistory(Bodyweight=form['bodyweight'], Datetime=now))
+    db.session.commit()
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -336,7 +349,7 @@ def show_basic():
             form_dict = process_workout_form(flask.request.form.to_dict())
             try:
                 schema.deserialize(form_dict)
-                save_workout_form_to_db(flask.request.form, conn, now_date)
+                save_workout_form_to_db(flask.request.form, now_date)
                 kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
                 return flask.render_template("index.html", **kwargs)
             except colander.Invalid:
@@ -362,7 +375,7 @@ def show_bodyweight_tracking():
             form_dict = flask.request.form.to_dict()
             try:
                 schema.deserialize(form_dict)
-                save_bodyweight_form_to_db(flask.request.form, conn, now)
+                save_bodyweight_form_to_db(flask.request.form, now)
                 return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
             except colander.Invalid:
                 print(traceback.format_exc())

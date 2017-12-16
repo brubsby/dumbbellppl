@@ -1,5 +1,7 @@
+import operator
 import traceback
 from collections import namedtuple, OrderedDict
+from functools import reduce
 
 import flask
 import sqlite3
@@ -7,13 +9,16 @@ import itertools
 import datetime
 import colander
 import math
+
+import sqlalchemy
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
-from sqlalchemy import literal
+from sqlalchemy import literal, func, cast
+from sqlalchemy.sql import label
 
 from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 import flask_sqlalchemy
@@ -385,10 +390,10 @@ def show_bodyweight_tracking():
             return flask.render_template("bodyweight.html", **kwargs)
 
 
-def get_lifting_plots(conn):
+def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
-        LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "Weight"),
+        LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "LiftHistory_Weight"),
         LineScatter("Volume Per Lift Over Time", "Volume", "Volume"),
         LineScatter("Predicted 1RM Per Lift Over Time", "1RM", "Predicted1RM")
     ]
@@ -397,28 +402,35 @@ def get_lifting_plots(conn):
     for line_scatter in line_scatters:
         plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
                             x_axis_type='datetime', sizing_mode='scale_width'))
-    with conn or sqlite3.connect(DB_PATH,
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
-        for name, row in lifts_df.iterrows():
-            df = pandas.read_sql_query(
-                "SELECT LiftHistoryID, Name, Date, Weight, Reps1, Reps2, Reps3, VolumeMultiplier, AsymmetryMultiplier, "
-                "(Weight * (Reps1 + Reps2 + Reps3) * VolumeMultiplier * AsymmetryMultiplier) as Volume, "
-                "(cast(round(Weight / (1.0278 - 0.0278 * max(Reps1, Reps2, Reps3))) as int)) as Predicted1RM "
-                "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
-                "WHERE LiftFK = %s;" % row['LiftID'], conn, "LiftHistoryID")
-            source = ColumnDataSource(df)
-            for line_scatter, plot in zip(line_scatters, plots):
-                plot.line(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
-                          legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-                plot.scatter(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
-                             size=7)
+    lifts_df = pandas.read_sql_query(db.session.query(Lift.LiftID, Lift.Name).selectable, db.session.get_bind())
+    # lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
+    for name, row in lifts_df.iterrows():
+        df = pandas.read_sql_query(db.session.query(
+            LiftHistory.LiftHistoryID,
+            Lift.Name,
+            LiftHistory.Date,
+            LiftHistory.Weight,
+            LiftHistory.Reps1,
+            LiftHistory.Reps2,
+            LiftHistory.Reps3,
+            Lift.VolumeMultiplier,
+            Lift.AsymmetryMultiplier,
+            LiftHistory.volume.label("Volume"),
+            LiftHistory.predicted_1_rm.label("Predicted1RM")
+        ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
+                                   db.session.get_bind(), "LiftHistory_LiftHistoryID")
+        source = ColumnDataSource(df)
+        for line_scatter, plot in zip(line_scatters, plots):
+            plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source, color=Category20[20][row['Lifts_LiftID'] % 20],
+                      legend=(row['Lifts_Name'][:13] + '..') if len(row['Lifts_Name']) > 15 else row['Lifts_Name'])
+            plot.scatter(x='LiftHistory_Date', y=line_scatter.column, source=source, color=Category20[20][row['Lifts_LiftID'] % 20],
+                         size=7)
 
     default_tooltips = [
-        ("Date", "@Date{%F}"),
-        ("Lift", "@Name"),
-        ("Weight", "@Weight"),
-        ("Reps", "(@Reps1, @Reps2, @Reps3)")
+        ("Date", "@LiftHistory_Date{%F}"),
+        ("Lift", "@Lifts_Name"),
+        ("Weight", "@LiftHistory_Weight"),
+        ("Reps", "(@LiftHistory_Reps1, @LiftHistory_Reps2, @LiftHistory_Reps3)")
     ]
     hovers = []
     for line_scatter in line_scatters:
@@ -427,7 +439,7 @@ def get_lifting_plots(conn):
             tooltips = default_tooltips[:2] + [y_tooltip] + default_tooltips[2:]
         else:
             tooltips = default_tooltips
-        hovers.append(HoverTool(tooltips=tooltips, formatters={"Date": "datetime"}))
+        hovers.append(HoverTool(tooltips=tooltips, formatters={"LiftHistory_Date": "datetime"}))
     for plot, hover in zip(plots, hovers):
         plot.add_tools(hover)
         plot.legend.location = 'top_left'
@@ -459,7 +471,7 @@ def get_bodyweight_plot(conn=None):
 def show_stats(conn=None):
     with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        lifting_plots = get_lifting_plots(conn=conn)
+        lifting_plots = get_lifting_plots()
         lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
         bodyweight_plot = get_bodyweight_plot(conn=conn)
 

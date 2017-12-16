@@ -1,5 +1,8 @@
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, Text, \
+    UniqueConstraint, text, func, cast, literal
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import Integer
 from flask_sqlalchemy import SQLAlchemy
 
 
@@ -27,6 +30,16 @@ class LiftHistory(db.Model):
     Date = Column(Date, nullable=False)
 
     Lift = relationship('Lift')
+
+    @hybrid_property
+    def volume(self):
+        return self.Weight * (self.Reps1 + self.Reps2 + self.Reps3)\
+               * Lift.VolumeMultiplier * Lift.AsymmetryMultiplier
+
+    @hybrid_property
+    def predicted_1_rm(self):
+        return cast(self.Weight / (literal(1.0278) - (literal(0.0278)
+                    * func.max(self.Reps1, self.Reps2, self.Reps3))), Integer)
 
 
 class Lift(db.Model):

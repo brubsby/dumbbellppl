@@ -1,16 +1,12 @@
-import operator
 import traceback
 from collections import namedtuple, OrderedDict
-from functools import reduce
 
 import flask
-import sqlite3
 import itertools
 import datetime
 import colander
 import math
 
-import sqlalchemy
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
@@ -18,10 +14,8 @@ from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
 from sqlalchemy import literal, func, cast
-from sqlalchemy.sql import label
 
 from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
-import flask_sqlalchemy
 
 import os
 
@@ -336,58 +330,56 @@ def save_bodyweight_form_to_db(form, now):
 
 @app.route('/', methods=['GET', 'POST'])
 def show_basic():
-    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        kwargs = {
-            'unit': "lbs",
-            'available_weights': AVAILABLE_WEIGHTS
-        }
-        now_date = datetime.date.today() + datetime.timedelta(
-            days=flask.request.args.get('offset', default=0, type=int))
-        fill_rests_and_misses(now_date)
-        if is_todays_workout_done(now_date):
-            kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
-        else:
-            kwargs = {**kwargs, **get_new_workout_data()}
+    kwargs = {
+        'unit': "lbs",
+        'available_weights': AVAILABLE_WEIGHTS
+    }
+    now_date = datetime.date.today() + datetime.timedelta(
+        days=flask.request.args.get('offset', default=0, type=int))
+    fill_rests_and_misses(now_date)
+    if is_todays_workout_done(now_date):
+        kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
+    else:
+        kwargs = {**kwargs, **get_new_workout_data()}
 
-        if flask.request.method == 'POST':
-            schema = WorkoutColander()
-            form_dict = process_workout_form(flask.request.form.to_dict())
-            try:
-                schema.deserialize(form_dict)
-                save_workout_form_to_db(flask.request.form, now_date)
-                kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
-                return flask.render_template("index.html", **kwargs)
-            except colander.Invalid:
-                kwargs['fail_validation'] = True
-                return flask.render_template("index.html", **kwargs)
-        else:
+    if flask.request.method == 'POST':
+        schema = WorkoutColander()
+        form_dict = process_workout_form(flask.request.form.to_dict())
+        try:
+            schema.deserialize(form_dict)
+            save_workout_form_to_db(flask.request.form, now_date)
+            kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
             return flask.render_template("index.html", **kwargs)
+        except colander.Invalid:
+            kwargs['fail_validation'] = True
+            return flask.render_template("index.html", **kwargs)
+    else:
+        return flask.render_template("index.html", **kwargs)
 
 
 @app.route('/bodyweight', methods=['GET', 'POST'])
 def show_bodyweight_tracking():
-    with sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        kwargs = {
-            'unit': "lbs"
-        }
-        now = datetime.datetime.now() + datetime.timedelta(
-            days=flask.request.args.get('offset', default=0, type=int))
-        previous_bodyweight = get_previous_bodyweight()
-        if previous_bodyweight:
-            kwargs['previous_bodyweight'] = previous_bodyweight
-        if flask.request.method == 'POST':
-            schema = BodyweightColander()
-            form_dict = flask.request.form.to_dict()
-            try:
-                schema.deserialize(form_dict)
-                save_bodyweight_form_to_db(flask.request.form, now)
-                return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
-            except colander.Invalid:
-                print(traceback.format_exc())
-                kwargs['fail_validation'] = True
-                return flask.render_template("bodyweight.html", **kwargs)
-        else:
+    kwargs = {
+        'unit': "lbs"
+    }
+    now = datetime.datetime.now() + datetime.timedelta(
+        days=flask.request.args.get('offset', default=0, type=int))
+    previous_bodyweight = get_previous_bodyweight()
+    if previous_bodyweight:
+        kwargs['previous_bodyweight'] = previous_bodyweight
+    if flask.request.method == 'POST':
+        schema = BodyweightColander()
+        form_dict = flask.request.form.to_dict()
+        try:
+            schema.deserialize(form_dict)
+            save_bodyweight_form_to_db(flask.request.form, now)
+            return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
+        except colander.Invalid:
+            print(traceback.format_exc())
+            kwargs['fail_validation'] = True
             return flask.render_template("bodyweight.html", **kwargs)
+    else:
+        return flask.render_template("bodyweight.html", **kwargs)
 
 
 def get_lifting_plots():
@@ -421,9 +413,11 @@ def get_lifting_plots():
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
-            plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source, color=Category20[20][row['Lifts_LiftID'] % 20],
+            plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
+                      color=Category20[20][row['Lifts_LiftID'] % 20],
                       legend=(row['Lifts_Name'][:13] + '..') if len(row['Lifts_Name']) > 15 else row['Lifts_Name'])
-            plot.scatter(x='LiftHistory_Date', y=line_scatter.column, source=source, color=Category20[20][row['Lifts_LiftID'] % 20],
+            plot.scatter(x='LiftHistory_Date', y=line_scatter.column, source=source,
+                         color=Category20[20][row['Lifts_LiftID'] % 20],
                          size=7)
 
     default_tooltips = [
@@ -447,23 +441,20 @@ def get_lifting_plots():
     return plots
 
 
-def get_bodyweight_plot(conn=None):
-    with conn or sqlite3.connect(DB_PATH,
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        bodyweights_df = \
-            pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
-                                  .order_by(BodyweightHistory.Datetime.asc()).selectable,
-                                  db.session.get_bind(),
-                                  parse_dates=["BodyweightHistory_Datetime"])
-        # bodyweights_df = \
-        #     pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
-        #                           parse_dates=["Datetime"])
+def get_bodyweight_plot():
+    bodyweights_df = \
+        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
+                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
+                              db.session.get_bind(),
+                              parse_dates=["BodyweightHistory_Datetime"])
     add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Datetime', 'BodyweightHistory_Bodyweight', 288000)
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
-    bodyweight_plot.line(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight_nhema', source=source, color=Category20[20][0])
-    bodyweight_plot.scatter(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight', source=source, color=Category20[20][0], size=7)
+    bodyweight_plot.line(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight_nhema', source=source,
+                         color=Category20[20][0])
+    bodyweight_plot.scatter(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight', source=source,
+                            color=Category20[20][0], size=7)
     bodyweight_plot.add_tools(HoverTool(tooltips=[
         ("Bodyweight", "@BodyweightHistory_Bodyweight"),
         ("BodyweightEMA", "@BodyweightHistory_Bodyweight_nhema"),
@@ -473,12 +464,10 @@ def get_bodyweight_plot(conn=None):
 
 
 @app.route('/stats')
-def show_stats(conn=None):
-    with conn or sqlite3.connect(DB_PATH,
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        lifting_plots = get_lifting_plots()
-        lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
-        bodyweight_plot = get_bodyweight_plot(conn=conn)
+def show_stats():
+    lifting_plots = get_lifting_plots()
+    lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
+    bodyweight_plot = get_bodyweight_plot()
 
     lift_grid_script, lift_grid_div = components(lift_grid)
     bodyweight_script, bodyweight_div = components(bodyweight_plot)

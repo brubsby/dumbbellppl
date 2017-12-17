@@ -173,7 +173,7 @@ def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, 
         kwargs['last_value'] = value
         kwargs['last_timestamp'] = kwargs['timestamp']
         kwargs['last_average'] = average
-    dataframe[column_name + 'nhema'] = nhema_series.values
+    dataframe[column_name + '_nhema'] = nhema_series.values
 
 
 def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None,
@@ -451,19 +451,24 @@ def get_bodyweight_plot(conn=None):
     with conn or sqlite3.connect(DB_PATH,
                                  detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
         bodyweights_df = \
-            pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
-                                  parse_dates=["Datetime"])
-    add_nhema_column_to_dataframe(bodyweights_df, 'Datetime', 'Bodyweight', 288000)
+            pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
+                                  .order_by(BodyweightHistory.Datetime.asc()).selectable,
+                                  db.session.get_bind(),
+                                  parse_dates=["BodyweightHistory_Datetime"])
+        # bodyweights_df = \
+        #     pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
+        #                           parse_dates=["Datetime"])
+    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Datetime', 'BodyweightHistory_Bodyweight', 288000)
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
-    bodyweight_plot.line(x='Datetime', y='Bodyweightnhema', source=source, color=Category20[20][0])
-    bodyweight_plot.scatter(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0], size=7)
+    bodyweight_plot.line(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight_nhema', source=source, color=Category20[20][0])
+    bodyweight_plot.scatter(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight', source=source, color=Category20[20][0], size=7)
     bodyweight_plot.add_tools(HoverTool(tooltips=[
-        ("Bodyweight", "@Bodyweight"),
-        ("BodyweightEMA", "@Bodyweightnhema"),
-        ("Datetime", "@Datetime{%T %F}")
-    ], formatters={"Datetime": "datetime"}))
+        ("Bodyweight", "@BodyweightHistory_Bodyweight"),
+        ("BodyweightEMA", "@BodyweightHistory_Bodyweight_nhema"),
+        ("Datetime", "@BodyweightHistory_Datetime{%T %F}")
+    ], formatters={"BodyweightHistory_Datetime": "datetime"}))
     return bodyweight_plot
 
 

@@ -14,6 +14,7 @@ from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
 from sqlalchemy import literal, func, cast
+from flask_migrate import Migrate
 
 from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 
@@ -66,6 +67,7 @@ os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
 DB_URI = 'sqlite:///{}'.format(DB_PATH)
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 db.init_app(app)
+migrate = Migrate(app, db)
 
 
 @app.before_first_request

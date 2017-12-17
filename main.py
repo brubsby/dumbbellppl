@@ -1,50 +1,53 @@
 import traceback
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 import flask
-import sqlite3
 import itertools
 import datetime
 import colander
 import math
+
 from bokeh.plotting import figure
 from bokeh.embed import components
 from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
+from sqlalchemy import literal, func, cast
+
+from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 
 import os
 
-Lift = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
-Lift.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
+LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
+LiftTuple.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
 
-WORKOUTS = {
+WORKOUTS = OrderedDict(sorted({
     'PUSH_LIFTS': [
-        Lift('Chest Press'),
-        Lift('Incline Fly'),
-        Lift('Arnold Press'),
-        Lift('Overhead Triceps Extension', 1, 1)
+        LiftTuple('Chest Press'),
+        LiftTuple('Incline Fly'),
+        LiftTuple('Arnold Press'),
+        LiftTuple('Overhead Triceps Extension', 1, 1)
     ],
     'PULL_LIFTS': [
-        Lift('Pull-up', 1, 1),
-        Lift('Bent-Over Row', 1, 2),
-        Lift('Reverse Fly'),
-        Lift('Shrug'),
-        Lift('Bicep Curl')
+        LiftTuple('Pull-up', 1, 1),
+        LiftTuple('Bent-Over Row', 1, 2),
+        LiftTuple('Reverse Fly'),
+        LiftTuple('Shrug'),
+        LiftTuple('Bicep Curl')
     ],
     'LEG_LIFTS': [
-        Lift('Goblet Squat', 1, 1),
-        Lift('Lunge', 2, 2),
-        Lift('Single Leg Deadlift', 1, 2),
-        Lift('Calf Raise')
+        LiftTuple('Goblet Squat', 1, 1),
+        LiftTuple('Lunge', 2, 2),
+        LiftTuple('Single Leg Deadlift', 1, 2),
+        LiftTuple('Calf Raise')
     ],
     'EVERY_OTHER_LIFTS': [
-        Lift('Hanging Leg Raises', 1, 2)
+        LiftTuple('Hanging Leg Raises', 1, 2)
     ],
     'REST': [],
     'MISS': []
-}
+}.items()))
 
 AVAILABLE_WEIGHTS = [0, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 30, 35, 40, 45, 50, 52.5]
 
@@ -58,94 +61,75 @@ DAY_WORKOUT_DICT = {
     6: 'LEG_LIFTS'
 }
 app = flask.Flask(__name__)
+DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'userdata.db')
+os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
+DB_URI = 'sqlite:///{}'.format(DB_PATH)
+app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
+db.init_app(app)
 
 
-def create_tables_if_not_exist():
-    os.makedirs(os.path.join('data'), exist_ok=True)
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS Lifts ("
-            "LiftID INTEGER PRIMARY KEY, "
-            "Name TEXT NOT NULL, "
-            "VolumeMultiplier INTEGER DEFAULT 2, "
-            "AsymmetryMultiplier INTEGER DEFAULT 1, "
-            "UNIQUE(Name), "
-            "CHECK (VolumeMultiplier IN (1, 2) and AsymmetryMultiplier IN (1, 2)))")
-        cursor.executemany("INSERT INTO Lifts (Name, VolumeMultiplier, AsymmetryMultiplier) "
-                           "SELECT ?, ?, ? WHERE NOT EXISTS(SELECT 1 FROM Lifts WHERE Name = ?);",
-                           [(lift.Name, lift.VolumeMultiplier, lift.AsymmetryMultiplier, lift.Name)
-                            for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))])
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS Workouts (WorkoutID INTEGER PRIMARY KEY, Name TEXT NOT NULL, UNIQUE(Name))")
-        cursor.executemany(
-            "INSERT INTO Workouts (Name) SELECT ? WHERE NOT EXISTS(SELECT 1 FROM Workouts WHERE Name = ?);",
-            [(lift_day, lift_day) for lift_day in WORKOUTS.keys()])
-        cursor.execute(
-            "CREATE TABLE IF NOT EXISTS WorkoutContents ("
-            "WorkoutContentID INTEGER PRIMARY KEY, "
-            'WorkoutFK INTEGER NOT NULL, '
-            'LiftFK INTEGER NOT NULL, '
-            "FOREIGN KEY (WorkoutFK) REFERENCES Lifts(WorkoutID), "
-            "FOREIGN KEY (LiftFK) REFERENCES Lifts(LiftID), "
-            "UNIQUE(WorkoutFK, LiftFK));")
-        for workout, lift_list in WORKOUTS.items():
-            cursor.executemany(
-                "INSERT INTO WorkoutContents (WorkoutFK, LiftFK) "
-                "SELECT (SELECT WorkoutID FROM Workouts WHERE Name = ?), (SELECT LiftID FROM Lifts WHERE Name = ?) "
-                "WHERE NOT EXISTS("
-                "SELECT 1 FROM WorkoutContents WHERE WorkoutFK = (SELECT WorkoutID FROM Workouts WHERE Name = ?) "
-                "AND LiftFK = (SELECT LiftID FROM Lifts WHERE Name = ?));",
-                [(workout, lift.Name, workout, lift.Name) for lift in lift_list])
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS LiftHistory ('
-            'LiftHistoryID INTEGER PRIMARY KEY, '
-            'LiftFK INTEGER NOT NULL, '
-            'Reps1 INTEGER NOT NULL, '
-            'Reps2 INTEGER NOT NULL, '
-            'Reps3 INTEGER NOT NULL, '
-            'Weight NUMBER NOT NULL, '
-            'Date DATE NOT NULL, '
-            'FOREIGN KEY (LiftFK) REFERENCES Lifts(LiftID));')
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS WorkoutHistory ('
-            'WorkoutHistoryID INTEGER PRIMARY KEY, '
-            'WorkoutFK INTEGER NOT NULL, '
-            'Date DATE NOT NULL, '
-            'FOREIGN KEY (WorkoutFK) REFERENCES Workouts(WorkoutID));')
-        cursor.execute(
-            'CREATE TABLE IF NOT EXISTS BodyweightHistory ('
-            'BodyweightHistoryID INTEGER PRIMARY KEY, '
-            'Bodyweight REAL NOT NULL, '
-            'Datetime DATETIME NOT NULL);')
+@app.before_first_request
+def initialize_db():
+    # create tables
+    db.create_all()
+
+    # add lifts
+    lifts = [
+        Lift(
+            Name=lift.Name,
+            VolumeMultiplier=lift.VolumeMultiplier,
+            AsymmetryMultiplier=lift.AsymmetryMultiplier)
+        for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))
+    ]
+    for lift in lifts:
+        if not Lift.query.filter(Lift.Name == lift.Name).count():
+            db.session.add(lift)
+
+    # add workouts
+    workouts = [Workout(
+            Name=workout)
+        for workout in WORKOUTS.keys()
+    ]
+    for workout in workouts:
+        if not Workout.query.filter(Workout.Name == workout.Name).count():
+            db.session.add(workout)
+
+    # add the contents of the workouts
+    for workout_name, lift_list in WORKOUTS.items():
+        workout_id_query = db.session.query(Workout.WorkoutID).filter(Workout.Name == workout_name)
+        for lift in lift_list:
+            lift_id_query = db.session.query(Lift.LiftID).filter(Lift.Name == lift.Name)
+            workout_content_query = WorkoutContent.query.filter(
+                WorkoutContent.WorkoutFK == workout_id_query.subquery().c.WorkoutID,
+                WorkoutContent.LiftFK == lift_id_query.subquery().c.LiftID
+            )
+            if not workout_content_query.count():
+                workout_content = WorkoutContent(WorkoutFK=workout_id_query.first()[0],
+                                                 LiftFK=lift_id_query.first()[0])
+                db.session.add(workout_content)
+
+    db.session.commit()
 
 
-def is_todays_workout_done(conn, now_date):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    todays_workout_row = cursor.fetchone()
-    if not todays_workout_row:
+def is_todays_workout_done(now_date):
+    row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
+    if not row:
         return False
-    return todays_workout_row[0] == now_date
+    return row[0] == now_date
 
 
-def get_next_workout(conn):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    most_recent_workout_date_row = cursor.fetchone()
+def get_next_workout():
+    most_recent_workout_date_row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
     if not most_recent_workout_date_row:
         # no data, start on push
         return "PUSH_LIFTS"
-    last_six_workouts = get_last_six_workouts(conn)
+    last_six_workouts = get_last_six_workouts()
     if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
         return 'REST'
     else:
-        cursor.execute(
-            "SELECT Workouts.Name "
-            "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-            "WHERE Workouts.Name NOT IN ('REST', 'MISS')"
-            "ORDER BY Date DESC LIMIT 1;")
-        last_non_rest_or_miss_workout = cursor.fetchone()[0]
+        last_non_rest_or_miss_workout = db.session.query(Workout.Name)\
+            .filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK).filter(Workout.Name.notin_(('REST', 'MISS')))\
+            .order_by(WorkoutHistory.Date.desc()).first()[0]
         if not last_non_rest_or_miss_workout:
             return 'PUSH_LIFTS'
         if last_non_rest_or_miss_workout == 'PUSH_LIFTS':
@@ -157,22 +141,17 @@ def get_next_workout(conn):
     raise RuntimeError("Couldn't determine what workout day it is.")
 
 
-def get_last_six_workouts(conn):
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT Workouts.Name "
-        "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-        "ORDER BY Date DESC LIMIT 6;")
-    last_six_workouts = [tup[0] for tup in cursor.fetchall()]
+def get_last_six_workouts():
+    rows = db.session.query(Workout.Name).filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK).\
+        order_by(WorkoutHistory.Date.desc()).limit(6).all()
+    last_six_workouts = [tup[0] for tup in rows]
     return last_six_workouts
 
 
-def get_previous_bodyweight(conn):
-    cursor = conn.cursor()
-    cursor.execute("SELECT Bodyweight FROM BodyweightHistory ORDER BY Datetime DESC LIMIT 1;")
-    previous_bodyweight_row = cursor.fetchone()
-    if previous_bodyweight_row:
-        return previous_bodyweight_row[0]
+def get_previous_bodyweight():
+    row = db.session.query(BodyweightHistory.Bodyweight).order_by(BodyweightHistory.Datetime.desc()).first()
+    if row:
+        return row[0]
     else:
         return None
 
@@ -188,10 +167,11 @@ def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, 
         kwargs['last_value'] = value
         kwargs['last_timestamp'] = kwargs['timestamp']
         kwargs['last_average'] = average
-    dataframe[column_name + 'nhema'] = nhema_series.values
+    dataframe[column_name + '_nhema'] = nhema_series.values
 
 
-def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None, timestamp=None):
+def non_homogeneous_exponential_moving_average(value, tau, last_average=None, last_timestamp=None, last_value=None,
+                                               timestamp=None):
     if any(x is None for x in [last_average, last_timestamp, last_value, timestamp]):
         return value
     alpha = (timestamp - last_timestamp) / float(tau)
@@ -201,61 +181,52 @@ def non_homogeneous_exponential_moving_average(value, tau, last_average=None, la
     return average
 
 
-def fill_rests_and_misses(conn, now_date):
+def fill_rests_and_misses(now_date):
     # if any workout days were missed, insert the misses/rests into workout history
-    cursor = conn.cursor()
-    cursor.execute("SELECT Date FROM WorkoutHistory ORDER BY Date DESC LIMIT 1;")
-    most_recent_workout_date_row = cursor.fetchone()
+    most_recent_workout_date_row = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).first()
     if not most_recent_workout_date_row:
         # no workout data, return
         return
     most_recent_workout_date = most_recent_workout_date_row[0]
-    last_six_workouts = get_last_six_workouts(conn)
-    workout_date_tuple_to_add = []
+    last_six_workouts = get_last_six_workouts()
+    workout_histories_to_add = []
     iteration_date = most_recent_workout_date + datetime.timedelta(days=1)
     # rest day can only be the first day in a string of misses, can also be today
     if iteration_date <= now_date:
         if 'REST' not in last_six_workouts and 'MISS' not in last_six_workouts and len(last_six_workouts) == 6:
-            workout_date_tuple_to_add.append(('REST', iteration_date))
+            workout_histories_to_add.append(WorkoutHistory(
+                Workout=db.session.query(Workout).filter(Workout.Name == 'REST').first(),
+                Date=iteration_date))
             iteration_date = iteration_date + datetime.timedelta(days=1)
     # fill in all days up to and including yesterday with misses, if there was no workout
     while iteration_date < now_date:
-        workout_date_tuple_to_add.append(('MISS', iteration_date))
+        workout_histories_to_add.append(WorkoutHistory(
+            Workout=db.session.query(Workout).filter(Workout.Name == 'MISS').first(),
+            Date=iteration_date))
         iteration_date = iteration_date + datetime.timedelta(days=1)
-    cursor.executemany("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?);",
-                       (tup for tup in workout_date_tuple_to_add))
+    db.session.add_all(workout_histories_to_add)
+    db.session.commit()
 
 
-def get_todays_workout_data(conn):
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT Workouts.Name "
-        "FROM Workouts JOIN WorkoutHistory ON Workouts.WorkoutID = WorkoutHistory.WorkoutFK "
-        "ORDER BY Date DESC LIMIT 1;")
-    workout = cursor.fetchone()[0]
+def get_todays_workout_data():
+    workout = db.session.query(Workout.Name).filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK)\
+        .order_by(WorkoutHistory.Date.desc()).first()[0]
     lift_data = []
     for lift in WORKOUTS[workout]:
-        cursor.execute(
-            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
-            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 1", (lift.Name,))
-        lift_row = cursor.fetchone()
+        lift_row = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
+            .filter(LiftHistory.LiftFK == Lift.LiftID).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc()).first()
         lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
         lift_data.append(lift_dict)
     return {"workout_id": workout, "lift_data": lift_data}
 
 
-def get_new_workout_data(conn):
-    cursor = conn.cursor()
+def get_new_workout_data():
     lift_data = []
-    workout = get_next_workout(conn)
-    for lift in WORKOUTS[workout]:
-        cursor.execute(
-            "SELECT LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3 "
-            "FROM Lifts LEFT OUTER JOIN LiftHistory ON Lifts.LiftID = LiftHistory.LiftFK WHERE Lifts.Name = ? "
-            "ORDER BY Date DESC LIMIT 3", (lift.Name,))
-        data = cursor.fetchall()
+    workout = get_next_workout()
+    for lift in WORKOUTS[workout]:  # TODO change query to actually look at the database....
+        data = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
+            .filter(Lift.LiftID == LiftHistory.LiftFK).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc())\
+            .limit(3).all()
         lift_dict = {"name": lift.Name, "previous_reps": []}
         if data[0][0] is None:
             lift_data.append(lift_dict)
@@ -290,126 +261,131 @@ def get_new_workout_data(conn):
     return {"workout_id": workout, "lift_data": lift_data}
 
 
-class Lift(colander.MappingSchema):
+class LiftColander(colander.MappingSchema):
     set_1_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
 
 
-class Lifts(colander.SequenceSchema):
-    lifts = Lift()
+class LiftsColander(colander.SequenceSchema):
+    lifts = LiftColander()
 
 
-class Workout(colander.MappingSchema):
+class WorkoutColander(colander.MappingSchema):
     workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
-    lifts = Lifts()
+    lifts = LiftsColander()
 
 
-class Bodyweight(colander.MappingSchema):
+class BodyweightColander(colander.MappingSchema):
     bodyweight = colander.SchemaNode(colander.Float(), validator=colander.Range(0, 500))
 
 
-def process_workout_form(dict):
-    return_dict = {'workout_id': dict.pop('workout-id'), 'lifts': []}
+def process_workout_form(form_dict):
+    return_dict = {'workout_id': form_dict.pop('workout-id'), 'lifts': []}
     weight_format_string = 'weight%i'
     lift_index = 1
     while True:
-        if weight_format_string % lift_index not in dict:
+        if weight_format_string % lift_index not in form_dict:
             break
-        lift_to_add = {'dumbbell_weight': dict.pop(weight_format_string % lift_index, None)}
+        lift_to_add = {'dumbbell_weight': form_dict.pop(weight_format_string % lift_index, None)}
         for set_index in range(1, 4):
             rep_string_key = 'lift%iset%i' % (lift_index, set_index)
-            lift_to_add['set_%i_reps' % set_index] = dict.pop(rep_string_key, None)
+            lift_to_add['set_%i_reps' % set_index] = form_dict.pop(rep_string_key, None)
         return_dict['lifts'].append(lift_to_add)
         lift_index += 1
     return return_dict
 
 
-def save_workout_form_to_db(form, conn, now_date):
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM WorkoutHistory WHERE Date = ? LIMIT 1",
-                   (now_date,))
-    data = cursor.fetchall()
-    if not data:
+def save_workout_form_to_db(form, now_date):
+    todays_workout_exists = db.session.query(literal(True)).filter(
+        db.session.query(WorkoutHistory).filter(WorkoutHistory.Date == now_date).exists()).scalar()
+    if not todays_workout_exists:
         i = 1
-        for lift in WORKOUTS[form['workout-id']]:
-            cursor.execute("INSERT INTO LiftHistory(LiftFk, Reps1, Reps2, Reps3, Weight, Date) "
-                           "VALUES ((SELECT LiftID FROM Lifts WHERE Name = ?), ?, ?, ?, ?, ?)",
-                           (lift.Name, form['lift%iset1' % i], form['lift%iset2' % i], form['lift%iset3' % i], form['weight%i' % i], now_date))
+        lift_histories_to_add = []
+        for lift in WORKOUTS[form['workout-id']]:  # TODO actually get workouts from db...
+            lift_histories_to_add.append(LiftHistory(
+                Lift=db.session.query(Lift).filter(Lift.Name == lift.Name).first(),
+                Reps1=form['lift%iset1' % i],
+                Reps2=form['lift%iset2' % i],
+                Reps3=form['lift%iset3' % i],
+                Weight=form['weight%i' % i],
+                Date=now_date
+            ))
             i += 1
-        cursor.execute("INSERT INTO WorkoutHistory(WorkoutFK, Date) "
-                       "VALUES ((SELECT WorkoutID FROM Workouts WHERE Name = ?), ?)",
-                       (form['workout-id'], now_date))
+        db.session.add_all(lift_histories_to_add)
+        db.session.add(WorkoutHistory(
+            Workout=db.session.query(Workout).filter(Workout.Name == form['workout-id']).first(),
+            Date=now_date
+        ))
+        db.session.commit()
     else:
         raise colander.Invalid(None, "You aren't allowed to submit two workouts in a day")
 
 
-def save_bodyweight_form_to_db(form, conn, now):
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO BodyweightHistory(Bodyweight, Datetime) VALUES (?, ?)", (form['bodyweight'], now))
+def save_bodyweight_form_to_db(form, now):
+    db.session.add(BodyweightHistory(Bodyweight=form['bodyweight'], Datetime=now))
+    db.session.commit()
 
 
 @app.route('/', methods=['GET', 'POST'])
 def show_basic():
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        kwargs = {
-            'unit': "lbs",
-            'available_weights': AVAILABLE_WEIGHTS
-        }
-        now_date = datetime.date.today() + datetime.timedelta(
-            days=flask.request.args.get('offset', default=0, type=int))
-        fill_rests_and_misses(conn, now_date)
-        if is_todays_workout_done(conn, now_date):
-            kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
-        else:
-            kwargs = {**kwargs, **get_new_workout_data(conn)}
+    kwargs = {
+        'unit': "lbs",
+        'available_weights': AVAILABLE_WEIGHTS
+    }
+    now_date = datetime.date.today() + datetime.timedelta(
+        days=flask.request.args.get('offset', default=0, type=int))
+    fill_rests_and_misses(now_date)
+    if is_todays_workout_done(now_date):
+        kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
+    else:
+        kwargs = {**kwargs, **get_new_workout_data()}
 
-        if flask.request.method == 'POST':
-            schema = Workout()
-            form_dict = process_workout_form(flask.request.form.to_dict())
-            try:
-                schema.deserialize(form_dict)
-                save_workout_form_to_db(flask.request.form, conn, now_date)
-                kwargs = {**kwargs, **get_todays_workout_data(conn), "done": True}
-                return flask.render_template("index.html", **kwargs)
-            except colander.Invalid:
-                kwargs['fail_validation'] = True
-                return flask.render_template("index.html", **kwargs)
-        else:
+    if flask.request.method == 'POST':
+        schema = WorkoutColander()
+        form_dict = process_workout_form(flask.request.form.to_dict())
+        try:
+            schema.deserialize(form_dict)
+            save_workout_form_to_db(flask.request.form, now_date)
+            kwargs = {**kwargs, **get_todays_workout_data(), "done": True}
             return flask.render_template("index.html", **kwargs)
+        except colander.Invalid:
+            kwargs['fail_validation'] = True
+            return flask.render_template("index.html", **kwargs)
+    else:
+        return flask.render_template("index.html", **kwargs)
 
 
 @app.route('/bodyweight', methods=['GET', 'POST'])
 def show_bodyweight_tracking():
-    with sqlite3.connect(os.path.join('data', 'userdata.db'), detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        kwargs = {
-            'unit': "lbs"
-        }
-        now = datetime.datetime.now() + datetime.timedelta(
-            days=flask.request.args.get('offset', default=0, type=int))
-        previous_bodyweight = get_previous_bodyweight(conn)
-        if previous_bodyweight:
-            kwargs['previous_bodyweight'] = previous_bodyweight
-        if flask.request.method == 'POST':
-            schema = Bodyweight()
-            form_dict = flask.request.form.to_dict()
-            try:
-                schema.deserialize(form_dict)
-                save_bodyweight_form_to_db(flask.request.form, conn, now)
-                return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
-            except colander.Invalid:
-                print(traceback.format_exc())
-                kwargs['fail_validation'] = True
-                return flask.render_template("bodyweight.html", **kwargs)
-        else:
+    kwargs = {
+        'unit': "lbs"
+    }
+    now = datetime.datetime.now() + datetime.timedelta(
+        days=flask.request.args.get('offset', default=0, type=int))
+    previous_bodyweight = get_previous_bodyweight()
+    if previous_bodyweight:
+        kwargs['previous_bodyweight'] = previous_bodyweight
+    if flask.request.method == 'POST':
+        schema = BodyweightColander()
+        form_dict = flask.request.form.to_dict()
+        try:
+            schema.deserialize(form_dict)
+            save_bodyweight_form_to_db(flask.request.form, now)
+            return flask.redirect(flask.url_for('.show_stats', _anchor='bodyweight'), code=302)
+        except colander.Invalid:
+            print(traceback.format_exc())
+            kwargs['fail_validation'] = True
             return flask.render_template("bodyweight.html", **kwargs)
+    else:
+        return flask.render_template("bodyweight.html", **kwargs)
 
 
-def get_lifting_plots(conn):
+def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
-        LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "Weight"),
+        LineScatter("Dumbbell Weight Per Lift Over Time", "Weight", "LiftHistory_Weight"),
         LineScatter("Volume Per Lift Over Time", "Volume", "Volume"),
         LineScatter("Predicted 1RM Per Lift Over Time", "1RM", "Predicted1RM")
     ]
@@ -418,28 +394,37 @@ def get_lifting_plots(conn):
     for line_scatter in line_scatters:
         plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
                             x_axis_type='datetime', sizing_mode='scale_width'))
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
-        for name, row in lifts_df.iterrows():
-            df = pandas.read_sql_query(
-                "SELECT LiftHistoryID, Name, Date, Weight, Reps1, Reps2, Reps3, VolumeMultiplier, AsymmetryMultiplier, "
-                "(Weight * (Reps1 + Reps2 + Reps3) * VolumeMultiplier * AsymmetryMultiplier) as Volume, "
-                "(cast(round(Weight / (1.0278 - 0.0278 * max(Reps1, Reps2, Reps3))) as int)) as Predicted1RM "
-                "FROM LiftHistory INNER JOIN Lifts ON LiftHistory.LiftFK = Lifts.LiftID "
-                "WHERE LiftFK = %s;" % row['LiftID'], conn, "LiftHistoryID")
-            source = ColumnDataSource(df)
-            for line_scatter, plot in zip(line_scatters, plots):
-                plot.line(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
-                          legend=(row['Name'][:13] + '..') if len(row['Name']) > 15 else row['Name'])
-                plot.scatter(x='Date', y=line_scatter.column, source=source, color=Category20[20][row['LiftID'] % 20],
-                             size=7)
+    lifts_df = pandas.read_sql_query(db.session.query(Lift.LiftID, Lift.Name).selectable, db.session.get_bind())
+    # lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
+    for name, row in lifts_df.iterrows():
+        df = pandas.read_sql_query(db.session.query(
+            LiftHistory.LiftHistoryID,
+            Lift.Name,
+            LiftHistory.Date,
+            LiftHistory.Weight,
+            LiftHistory.Reps1,
+            LiftHistory.Reps2,
+            LiftHistory.Reps3,
+            Lift.VolumeMultiplier,
+            Lift.AsymmetryMultiplier,
+            LiftHistory.volume.label("Volume"),
+            LiftHistory.predicted_1_rm.label("Predicted1RM")
+        ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
+                                   db.session.get_bind(), "LiftHistory_LiftHistoryID")
+        source = ColumnDataSource(df)
+        for line_scatter, plot in zip(line_scatters, plots):
+            plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
+                      color=Category20[20][row['Lifts_LiftID'] % 20],
+                      legend=(row['Lifts_Name'][:13] + '..') if len(row['Lifts_Name']) > 15 else row['Lifts_Name'])
+            plot.scatter(x='LiftHistory_Date', y=line_scatter.column, source=source,
+                         color=Category20[20][row['Lifts_LiftID'] % 20],
+                         size=7)
 
     default_tooltips = [
-        ("Date", "@Date{%F}"),
-        ("Lift", "@Name"),
-        ("Weight", "@Weight"),
-        ("Reps", "(@Reps1, @Reps2, @Reps3)")
+        ("Date", "@LiftHistory_Date{%F}"),
+        ("Lift", "@Lifts_Name"),
+        ("Weight", "@LiftHistory_Weight"),
+        ("Reps", "(@LiftHistory_Reps1, @LiftHistory_Reps2, @LiftHistory_Reps3)")
     ]
     hovers = []
     for line_scatter in line_scatters:
@@ -448,7 +433,7 @@ def get_lifting_plots(conn):
             tooltips = default_tooltips[:2] + [y_tooltip] + default_tooltips[2:]
         else:
             tooltips = default_tooltips
-        hovers.append(HoverTool(tooltips=tooltips, formatters={"Date": "datetime"}))
+        hovers.append(HoverTool(tooltips=tooltips, formatters={"LiftHistory_Date": "datetime"}))
     for plot, hover in zip(plots, hovers):
         plot.add_tools(hover)
         plot.legend.location = 'top_left'
@@ -456,32 +441,33 @@ def get_lifting_plots(conn):
     return plots
 
 
-def get_bodyweight_plot(conn=None):
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        bodyweights_df = pandas.read_sql_query("SELECT Bodyweight, Datetime FROM BodyweightHistory ORDER BY Datetime ASC;", conn,
-                                               parse_dates=["Datetime"])
-    add_nhema_column_to_dataframe(bodyweights_df, 'Datetime', 'Bodyweight', 288000)
+def get_bodyweight_plot():
+    bodyweights_df = \
+        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
+                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
+                              db.session.get_bind(),
+                              parse_dates=["BodyweightHistory_Datetime"])
+    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Datetime', 'BodyweightHistory_Bodyweight', 288000)
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
-    bodyweight_plot.line(x='Datetime', y='Bodyweightnhema', source=source, color=Category20[20][0])
-    bodyweight_plot.scatter(x='Datetime', y='Bodyweight', source=source, color=Category20[20][0], size=7)
+    bodyweight_plot.line(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight_nhema', source=source,
+                         color=Category20[20][0])
+    bodyweight_plot.scatter(x='BodyweightHistory_Datetime', y='BodyweightHistory_Bodyweight', source=source,
+                            color=Category20[20][0], size=7)
     bodyweight_plot.add_tools(HoverTool(tooltips=[
-        ("Bodyweight", "@Bodyweight"),
-        ("BodyweightEMA", "@Bodyweightnhema"),
-        ("Datetime", "@Datetime{%T %F}")
-    ], formatters={"Datetime": "datetime"}))
+        ("Bodyweight", "@BodyweightHistory_Bodyweight"),
+        ("BodyweightEMA", "@BodyweightHistory_Bodyweight_nhema"),
+        ("Datetime", "@BodyweightHistory_Datetime{%T %F}")
+    ], formatters={"BodyweightHistory_Datetime": "datetime"}))
     return bodyweight_plot
 
 
 @app.route('/stats')
-def show_stats(conn=None):
-    with conn or sqlite3.connect(os.path.join('data', 'userdata.db'),
-                                 detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES) as conn:
-        lifting_plots = get_lifting_plots(conn=conn)
-        lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
-        bodyweight_plot = get_bodyweight_plot(conn=conn)
+def show_stats():
+    lifting_plots = get_lifting_plots()
+    lift_grid = gridplot([[plot] for plot in lifting_plots], sizing_mode='scale_width')
+    bodyweight_plot = get_bodyweight_plot()
 
     lift_grid_script, lift_grid_div = components(lift_grid)
     bodyweight_script, bodyweight_div = components(bodyweight_plot)
@@ -501,7 +487,4 @@ def favicon():
 
 
 if __name__ == '__main__':
-    create_tables_if_not_exist()
     app.run(host='127.0.0.1', port=8080)
-
-

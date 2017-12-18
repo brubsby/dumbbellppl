@@ -6,6 +6,7 @@ import itertools
 import datetime
 import colander
 import math
+import numpy
 
 from bokeh.plotting import figure
 from bokeh.embed import components
@@ -158,12 +159,12 @@ def get_previous_bodyweight():
         return None
 
 
-def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, tau):
+def add_nhema_column_to_dataframe(dataframe, column_name, tau):
     nhema_series = pandas.Series()
     kwargs = {}
     for i, row in enumerate(dataframe.itertuples()):
         value = getattr(row, column_name)
-        kwargs['timestamp'] = getattr(row, datetime_column_name).timestamp()
+        kwargs['timestamp'] = row.Index.timestamp()
         average = non_homogeneous_exponential_moving_average(value, tau, **kwargs)
         nhema_series.set_value(i, average)
         kwargs['last_value'] = value
@@ -230,7 +231,7 @@ def get_new_workout_data():
             .filter(Lift.LiftID == LiftHistory.LiftFK).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc())\
             .limit(3).all()
         lift_dict = {"name": lift.Name, "previous_reps": []}
-        if data[0][0] is None:
+        if not data:
             lift_data.append(lift_dict)
             continue
         lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
@@ -413,6 +414,7 @@ def get_lifting_plots():
             LiftHistory.predicted_1_rm.label("Predicted1RM")
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
+        # add_interpolated_bodyweights(df)
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
             plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
@@ -443,13 +445,31 @@ def get_lifting_plots():
     return plots
 
 
+def add_interpolated_bodyweights(to_add_df):
+    df = get_bodyweight_dataframe()
+    # empty frame with desired index
+    rs = pandas.DataFrame(index=df.resample('1D').mean().iloc[1:].index)
+
+    # array of indexes corresponding with closest timestamp after resample
+    idx_after = numpy.searchsorted(df.index.values, rs.index.values)
+
+    # values and timestamp before/after resample
+    rs['after'] = df.loc[df.index[idx_after], 'BodyweightHistory_Bodyweight_nhema'].values
+    rs['before'] = df.loc[df.index[idx_after - 1], 'BodyweightHistory_Bodyweight_nhema'].values
+    rs['after_time'] = df.index[idx_after]
+    rs['before_time'] = df.index[idx_after - 1]
+
+    # calculate new weighted value
+    rs['span'] = (rs['after_time'] - rs['before_time'])
+    rs['after_weight'] = (rs['after_time'] - rs.index) / rs['span']
+    # I got errors here unless I turn the index to a series
+    rs['before_weight'] = (pandas.Series(data=rs.index, index=rs.index) - rs['before_time']) / rs['span']
+
+    rs['BodyweightHistory_Bodyweight_nhema'] = rs.eval('before * before_weight + after * after_weight')
+
+
 def get_bodyweight_plot():
-    bodyweights_df = \
-        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
-                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
-                              db.session.get_bind(),
-                              parse_dates=["BodyweightHistory_Datetime"])
-    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Datetime', 'BodyweightHistory_Bodyweight', 288000)
+    bodyweights_df = get_bodyweight_dataframe()
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
@@ -463,6 +483,17 @@ def get_bodyweight_plot():
         ("Datetime", "@BodyweightHistory_Datetime{%T %F}")
     ], formatters={"BodyweightHistory_Datetime": "datetime"}))
     return bodyweight_plot
+
+
+def get_bodyweight_dataframe():
+    bodyweights_df = \
+        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
+                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
+                              db.session.get_bind(),
+                              parse_dates=["BodyweightHistory_Datetime"],
+                              index_col="BodyweightHistory_Datetime")
+    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Bodyweight', 288000)
+    return bodyweights_df
 
 
 @app.route('/stats')

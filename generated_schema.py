@@ -49,7 +49,7 @@ class Lift(db.Model):
     Name = Column(Text, nullable=False, unique=True)
     VolumeMultiplier = Column(Integer, CheckConstraint('VolumeMultiplier IN (1, 2)'), server_default=text("2"))
     AsymmetryMultiplier = Column(Integer, CheckConstraint('AsymmetryMultiplier IN (1, 2)'), server_default=text("1"))
-
+    BodyweightMultiplier = Column(Numeric, server_default=text("0"))
 
 class WorkoutContent(db.Model):
     __tablename__ = 'WorkoutContents'

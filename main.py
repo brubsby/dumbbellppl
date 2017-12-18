@@ -20,7 +20,7 @@ from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, 
 
 import os
 
-LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier'])
+LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier', 'BodyweightMultiplier'])
 LiftTuple.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
 
 WORKOUTS = OrderedDict(sorted({
@@ -31,7 +31,7 @@ WORKOUTS = OrderedDict(sorted({
         LiftTuple('Overhead Triceps Extension', 1, 1)
     ],
     'PULL_LIFTS': [
-        LiftTuple('Pull-up', 1, 1),
+        LiftTuple('Pull-up', 1, 1, 1),
         LiftTuple('Bent-Over Row', 1, 2),
         LiftTuple('Reverse Fly'),
         LiftTuple('Shrug'),

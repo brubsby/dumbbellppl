@@ -6,7 +6,6 @@ import itertools
 import datetime
 import colander
 import math
-import numpy
 
 from bokeh.plotting import figure
 from bokeh.embed import components
@@ -385,6 +384,13 @@ def show_bodyweight_tracking():
         return flask.render_template("bodyweight.html", **kwargs)
 
 
+def calculate_volume(weight, reps1, reps2, reps3,
+                     volume_multiplier, asymmetry_multiplier,
+                     bodyweight_multiplier, bodyweight):
+    return (weight + (bodyweight * bodyweight_multiplier))\
+           * (reps1 + reps2 + reps3) * volume_multiplier * asymmetry_multiplier
+
+
 def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
@@ -410,11 +416,21 @@ def get_lifting_plots():
             LiftHistory.Reps3,
             Lift.VolumeMultiplier,
             Lift.AsymmetryMultiplier,
-            LiftHistory.volume.label("Volume"),
+            Lift.BodyweightMultiplier,
             LiftHistory.predicted_1_rm.label("Predicted1RM")
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
-        # add_interpolated_bodyweights(df)
+        df = add_interpolated_bodyweights(df)
+        df['Volume'] = map(
+            calculate_volume,
+            df[LiftHistory.Weight.expression._label],
+            df[LiftHistory.Reps1.expression._label],
+            df[LiftHistory.Reps2.expression._label],
+            df[LiftHistory.Reps3.expression._label],
+            df[Lift.VolumeMultiplier.expression._label],
+            df[Lift.AsymmetryMultiplier.expression._label],
+            df[Lift.BodyweightMultiplier.expression._label],
+            df[BodyweightHistory.Bodyweight.expression._label + '_nhema'])
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
             plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
@@ -447,25 +463,10 @@ def get_lifting_plots():
 
 def add_interpolated_bodyweights(to_add_df):
     df = get_bodyweight_dataframe()
-    # empty frame with desired index
-    rs = pandas.DataFrame(index=df.resample('1D').mean().iloc[1:].index)
-
-    # array of indexes corresponding with closest timestamp after resample
-    idx_after = numpy.searchsorted(df.index.values, rs.index.values)
-
-    # values and timestamp before/after resample
-    rs['after'] = df.loc[df.index[idx_after], 'BodyweightHistory_Bodyweight_nhema'].values
-    rs['before'] = df.loc[df.index[idx_after - 1], 'BodyweightHistory_Bodyweight_nhema'].values
-    rs['after_time'] = df.index[idx_after]
-    rs['before_time'] = df.index[idx_after - 1]
-
-    # calculate new weighted value
-    rs['span'] = (rs['after_time'] - rs['before_time'])
-    rs['after_weight'] = (rs['after_time'] - rs.index) / rs['span']
-    # I got errors here unless I turn the index to a series
-    rs['before_weight'] = (pandas.Series(data=rs.index, index=rs.index) - rs['before_time']) / rs['span']
-
-    rs['BodyweightHistory_Bodyweight_nhema'] = rs.eval('before * before_weight + after * after_weight')
+    df.index = df.index.round('h')
+    df = df.resample('h').interpolate()
+    df = df.resample('D').asfreq()
+    return pandas.concat([to_add_df, df], axis=1, join='inner')
 
 
 def get_bodyweight_plot():

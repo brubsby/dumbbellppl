@@ -1,5 +1,6 @@
 import traceback
 from collections import namedtuple, OrderedDict
+from functools import partial
 
 import flask
 import itertools
@@ -158,12 +159,12 @@ def get_previous_bodyweight():
         return None
 
 
-def add_nhema_column_to_dataframe(dataframe, datetime_column_name, column_name, tau):
+def add_nhema_column_to_dataframe(dataframe, column_name, tau):
     nhema_series = pandas.Series()
     kwargs = {}
     for i, row in enumerate(dataframe.itertuples()):
         value = getattr(row, column_name)
-        kwargs['timestamp'] = getattr(row, datetime_column_name).timestamp()
+        kwargs['timestamp'] = row.Index.timestamp()
         average = non_homogeneous_exponential_moving_average(value, tau, **kwargs)
         nhema_series.set_value(i, average)
         kwargs['last_value'] = value
@@ -230,7 +231,7 @@ def get_new_workout_data():
             .filter(Lift.LiftID == LiftHistory.LiftFK).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc())\
             .limit(3).all()
         lift_dict = {"name": lift.Name, "previous_reps": []}
-        if data[0][0] is None:
+        if not data:
             lift_data.append(lift_dict)
             continue
         lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
@@ -384,6 +385,60 @@ def show_bodyweight_tracking():
         return flask.render_template("bodyweight.html", **kwargs)
 
 
+def calculate_volume(weight, reps1, reps2, reps3,
+                     volume_multiplier, asymmetry_multiplier,
+                     bodyweight_multiplier, bodyweight):
+    return (weight + (bodyweight * bodyweight_multiplier))\
+           * (reps1 + reps2 + reps3) * volume_multiplier * asymmetry_multiplier
+
+
+def calculate_volume_for_row(row):
+    if not len(row):
+        return None
+    return calculate_volume(
+        row['LiftHistory_Weight'],
+        row['LiftHistory_Reps1'],
+        row['LiftHistory_Reps2'],
+        row['LiftHistory_Reps3'],
+        row['Lifts_VolumeMultiplier'],
+        row['Lifts_AsymmetryMultiplier'],
+        row['Lifts_BodyweightMultiplier'],
+        row['BodyweightHistory_Bodyweight_nhema']
+    )
+
+
+def calculate_predicted_1_rm_row(row, formula='Brzycki'):
+    if not len(row):
+        return None
+    return predicted_1_rm(
+        row['LiftHistory_Weight'],
+        row['LiftHistory_Reps1'],
+        row['LiftHistory_Reps2'],
+        row['LiftHistory_Reps3'],
+        row['Lifts_BodyweightMultiplier'],
+        row['BodyweightHistory_Bodyweight_nhema'],
+        formula=formula
+    )
+
+
+def predicted_1_rm(weight, reps1, reps2, reps3, bodyweight_multiplier, bodyweight, formula='Brzycki'):
+    exercise_weight = weight + (bodyweight_multiplier * bodyweight)
+    max_reps = max([reps1, reps2, reps3])
+    if formula == 'Brzycki':
+        return int(exercise_weight / (1.0278 - (0.0278 * max_reps)))
+    elif formula == 'McGlothin':
+        return int(100 * exercise_weight / (101.3 - (2.67123 * max_reps)))
+    elif formula == 'Lombardi':
+        return int(exercise_weight * pow(max_reps, 0.1))
+    elif formula == 'Mayhew':
+        return int(100 * exercise_weight / (52.2 + (41.9 * pow(math.e, (-0.055 * max_reps)))))
+    elif formula == 'OConner':
+        return int(exercise_weight * (1 + max_reps / 40))
+    elif formula == 'Wathan':
+        return int(100 * exercise_weight / (48.8 + (53.8 * pow(math.e, (-0.075 * max_reps)))))
+
+
+
 def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
@@ -397,6 +452,7 @@ def get_lifting_plots():
         plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
                             x_axis_type='datetime', sizing_mode='scale_width'))
     lifts_df = pandas.read_sql_query(db.session.query(Lift.LiftID, Lift.Name).selectable, db.session.get_bind())
+    interpolated_bodyweights_dataframe = get_interpolated_bodyweights()
     # lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
     for name, row in lifts_df.iterrows():
         df = pandas.read_sql_query(db.session.query(
@@ -409,10 +465,12 @@ def get_lifting_plots():
             LiftHistory.Reps3,
             Lift.VolumeMultiplier,
             Lift.AsymmetryMultiplier,
-            LiftHistory.volume.label("Volume"),
-            LiftHistory.predicted_1_rm.label("Predicted1RM")
+            Lift.BodyweightMultiplier
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
+        df = add_interpolated_bodyweights(df, interpolated_bodyweights_dataframe=interpolated_bodyweights_dataframe)
+        df['Volume'] = df.apply(calculate_volume_for_row, axis=1)
+        df['Predicted1RM'] = df.apply(partial(calculate_predicted_1_rm_row, formula='Wathan'), axis=1)
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
             plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
@@ -443,13 +501,25 @@ def get_lifting_plots():
     return plots
 
 
+def add_interpolated_bodyweights(to_add_df, interpolated_bodyweights_dataframe=None):
+    if interpolated_bodyweights_dataframe is None:
+        interpolated_bodyweights_dataframe = get_interpolated_bodyweights()
+    return to_add_df.merge(interpolated_bodyweights_dataframe, left_on='LiftHistory_Date', right_index=True)
+
+
+def get_interpolated_bodyweights():
+    df = get_bodyweight_dataframe()
+    df.index = df.index.round('h')
+    df = df.resample('H').interpolate()
+    df = df.resample('D').asfreq()
+    df.index = df.index.date
+    df = df.fillna(method='ffill')
+    df = df.fillna(method='bfill')
+    return df
+
+
 def get_bodyweight_plot():
-    bodyweights_df = \
-        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
-                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
-                              db.session.get_bind(),
-                              parse_dates=["BodyweightHistory_Datetime"])
-    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Datetime', 'BodyweightHistory_Bodyweight', 288000)
+    bodyweights_df = get_bodyweight_dataframe()
     source = ColumnDataSource(bodyweights_df)
     bodyweight_plot = figure(title="Bodyweight Over Time", x_axis_label='Datetime', y_axis_label='Bodyweight',
                              x_axis_type='datetime', sizing_mode='scale_width')
@@ -463,6 +533,17 @@ def get_bodyweight_plot():
         ("Datetime", "@BodyweightHistory_Datetime{%T %F}")
     ], formatters={"BodyweightHistory_Datetime": "datetime"}))
     return bodyweight_plot
+
+
+def get_bodyweight_dataframe():
+    bodyweights_df = \
+        pandas.read_sql_query(db.session.query(BodyweightHistory.Bodyweight, BodyweightHistory.Datetime)
+                              .order_by(BodyweightHistory.Datetime.asc()).selectable,
+                              db.session.get_bind(),
+                              parse_dates=["BodyweightHistory_Datetime"],
+                              index_col="BodyweightHistory_Datetime")
+    add_nhema_column_to_dataframe(bodyweights_df, 'BodyweightHistory_Bodyweight', 288000)
+    return bodyweights_df
 
 
 @app.route('/stats')

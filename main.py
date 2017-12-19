@@ -391,6 +391,21 @@ def calculate_volume(weight, reps1, reps2, reps3,
            * (reps1 + reps2 + reps3) * volume_multiplier * asymmetry_multiplier
 
 
+def calculate_volume_for_row(row):
+    if not len(row):
+        return None
+    return calculate_volume(
+        row['LiftHistory_Weight'],
+        row['LiftHistory_Reps1'],
+        row['LiftHistory_Reps2'],
+        row['LiftHistory_Reps3'],
+        row['Lifts_VolumeMultiplier'],
+        row['Lifts_AsymmetryMultiplier'],
+        row['Lifts_BodyweightMultiplier'],
+        row['BodyweightHistory_Bodyweight_nhema']
+    )
+
+
 def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
@@ -404,6 +419,7 @@ def get_lifting_plots():
         plots.append(figure(title=line_scatter.title, x_axis_label='Date', y_axis_label=line_scatter.y_axis_label,
                             x_axis_type='datetime', sizing_mode='scale_width'))
     lifts_df = pandas.read_sql_query(db.session.query(Lift.LiftID, Lift.Name).selectable, db.session.get_bind())
+    interpolated_bodyweights_dataframe = get_interpolated_bodyweights()
     # lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
     for name, row in lifts_df.iterrows():
         df = pandas.read_sql_query(db.session.query(
@@ -420,17 +436,10 @@ def get_lifting_plots():
             LiftHistory.predicted_1_rm.label("Predicted1RM")
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
-        df = add_interpolated_bodyweights(df)
-        df['Volume'] = map(
-            calculate_volume,
-            df[LiftHistory.Weight.expression._label],
-            df[LiftHistory.Reps1.expression._label],
-            df[LiftHistory.Reps2.expression._label],
-            df[LiftHistory.Reps3.expression._label],
-            df[Lift.VolumeMultiplier.expression._label],
-            df[Lift.AsymmetryMultiplier.expression._label],
-            df[Lift.BodyweightMultiplier.expression._label],
-            df[BodyweightHistory.Bodyweight.expression._label + '_nhema'])
+        df = add_interpolated_bodyweights(df, interpolated_bodyweights_dataframe=interpolated_bodyweights_dataframe)
+        df['Volume'] = df.apply(
+            calculate_volume_for_row,
+            axis=1)
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
             plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,
@@ -461,12 +470,21 @@ def get_lifting_plots():
     return plots
 
 
-def add_interpolated_bodyweights(to_add_df):
+def add_interpolated_bodyweights(to_add_df, interpolated_bodyweights_dataframe=None):
+    if interpolated_bodyweights_dataframe is None:
+        interpolated_bodyweights_dataframe = get_interpolated_bodyweights()
+    return to_add_df.merge(interpolated_bodyweights_dataframe, left_on='LiftHistory_Date', right_index=True)
+
+
+def get_interpolated_bodyweights():
     df = get_bodyweight_dataframe()
     df.index = df.index.round('h')
-    df = df.resample('h').interpolate()
+    df = df.resample('H').interpolate()
     df = df.resample('D').asfreq()
-    return pandas.concat([to_add_df, df], axis=1, join='inner')
+    df.index = df.index.date
+    df = df.fillna(method='ffill')
+    df = df.fillna(method='bfill')
+    return df
 
 
 def get_bodyweight_plot():

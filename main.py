@@ -1,5 +1,6 @@
 import traceback
 from collections import namedtuple, OrderedDict
+from functools import partial
 
 import flask
 import itertools
@@ -406,6 +407,38 @@ def calculate_volume_for_row(row):
     )
 
 
+def calculate_predicted_1_rm_row(row, formula='Brzycki'):
+    if not len(row):
+        return None
+    return predicted_1_rm(
+        row['LiftHistory_Weight'],
+        row['LiftHistory_Reps1'],
+        row['LiftHistory_Reps2'],
+        row['LiftHistory_Reps3'],
+        row['Lifts_BodyweightMultiplier'],
+        row['BodyweightHistory_Bodyweight_nhema'],
+        formula=formula
+    )
+
+
+def predicted_1_rm(weight, reps1, reps2, reps3, bodyweight_multiplier, bodyweight, formula='Brzycki'):
+    exercise_weight = weight + (bodyweight_multiplier * bodyweight)
+    max_reps = max([reps1, reps2, reps3])
+    if formula == 'Brzycki':
+        return int(exercise_weight / (1.0278 - (0.0278 * max_reps)))
+    elif formula == 'McGlothin':
+        return int(100 * exercise_weight / (101.3 - (2.67123 * max_reps)))
+    elif formula == 'Lombardi':
+        return int(exercise_weight * pow(max_reps, 0.1))
+    elif formula == 'Mayhew':
+        return int(100 * exercise_weight / (52.2 + (41.9 * pow(math.e, (-0.055 * max_reps)))))
+    elif formula == 'OConner':
+        return int(exercise_weight * (1 + max_reps / 40))
+    elif formula == 'Wathan':
+        return int(100 * exercise_weight / (48.8 + (53.8 * pow(math.e, (-0.075 * max_reps)))))
+
+
+
 def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [
@@ -432,14 +465,12 @@ def get_lifting_plots():
             LiftHistory.Reps3,
             Lift.VolumeMultiplier,
             Lift.AsymmetryMultiplier,
-            Lift.BodyweightMultiplier,
-            LiftHistory.predicted_1_rm.label("Predicted1RM")
+            Lift.BodyweightMultiplier
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
         df = add_interpolated_bodyweights(df, interpolated_bodyweights_dataframe=interpolated_bodyweights_dataframe)
-        df['Volume'] = df.apply(
-            calculate_volume_for_row,
-            axis=1)
+        df['Volume'] = df.apply(calculate_volume_for_row, axis=1)
+        df['Predicted1RM'] = df.apply(partial(calculate_predicted_1_rm_row, formula='Wathan'), axis=1)
         source = ColumnDataSource(df)
         for line_scatter, plot in zip(line_scatters, plots):
             plot.line(x='LiftHistory_Date', y=line_scatter.column, source=source,

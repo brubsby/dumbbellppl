@@ -1,5 +1,5 @@
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, Text, \
-    UniqueConstraint, text, func, cast, literal
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Text, \
+    UniqueConstraint, text, func, cast, literal, types
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import Integer
@@ -8,6 +8,27 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 metadata = db.metadata
+
+
+class SqliteNumeric(types.TypeDecorator):
+
+    @property
+    def python_type(self):
+        return float
+
+    impl = types.String
+
+    def load_dialect_impl(self, dialect):
+        return dialect.type_descriptor(types.VARCHAR(100))
+
+    def process_bind_param(self, value, dialect):
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        return float(value)
+
+    def process_literal_param(self, value, dialect):
+        return str(value)
 
 
 class BodyweightHistory(db.Model):
@@ -26,20 +47,10 @@ class LiftHistory(db.Model):
     Reps1 = Column(Integer, nullable=False)
     Reps2 = Column(Integer, nullable=False)
     Reps3 = Column(Integer, nullable=False)
-    Weight = Column(Numeric, nullable=False)
+    Weight = Column(SqliteNumeric, nullable=False)
     Date = Column(Date, nullable=False)
 
     Lift = relationship('Lift')
-
-    @hybrid_property
-    def volume(self):
-        return self.Weight * (self.Reps1 + self.Reps2 + self.Reps3)\
-               * Lift.VolumeMultiplier * Lift.AsymmetryMultiplier
-
-    @hybrid_property
-    def predicted_1_rm(self):
-        return cast(self.Weight / (literal(1.0278) - (literal(0.0278)
-                    * func.max(self.Reps1, self.Reps2, self.Reps3))), Integer)
 
 
 class Lift(db.Model):
@@ -49,7 +60,7 @@ class Lift(db.Model):
     Name = Column(Text, nullable=False, unique=True)
     VolumeMultiplier = Column(Integer, CheckConstraint('VolumeMultiplier IN (1, 2)'), server_default=text("2"))
     AsymmetryMultiplier = Column(Integer, CheckConstraint('AsymmetryMultiplier IN (1, 2)'), server_default=text("1"))
-    BodyweightMultiplier = Column(Numeric, server_default=text("0"))
+    BodyweightMultiplier = Column(SqliteNumeric, server_default=text("0"))
 
 class WorkoutContent(db.Model):
     __tablename__ = 'WorkoutContents'

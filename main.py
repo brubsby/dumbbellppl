@@ -17,7 +17,7 @@ import pandas
 from sqlalchemy import literal, func, cast
 from flask_migrate import Migrate
 
-from generated_schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
+from schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 
 import os
 

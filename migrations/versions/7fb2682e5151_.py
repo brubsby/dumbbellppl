@@ -10,7 +10,6 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-from generated_schema import Lift
 
 revision = '7fb2682e5151'
 down_revision = None

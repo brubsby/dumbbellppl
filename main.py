@@ -212,29 +212,52 @@ def fill_rests_and_misses(now_date):
 
 
 def get_todays_workout_data():
-    workout = db.session.query(Workout.Name).filter(Workout.WorkoutID == WorkoutHistory.WorkoutFK)\
-        .order_by(WorkoutHistory.Date.desc()).first()[0]
+    workout_data = db.session.query(Workout.Name, WorkoutHistory.Notes).filter(
+        Workout.WorkoutID == WorkoutHistory.WorkoutFK).order_by(WorkoutHistory.Date.desc()).first()
+    workout = workout_data[0]
+    workout_notes = workout_data[1]
     lift_data = []
     for lift in WORKOUTS[workout]:  # TODO Query DB instead of using constant
-        lift_row = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
-            .filter(LiftHistory.LiftFK == Lift.LiftID).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc()).first()
-        lift_dict = {"name": lift.Name, "weight": lift_row[0], "previous_reps": [lift_row[1], lift_row[2], lift_row[3]]}
+        lift_row = db.session.query(
+            LiftHistory.Weight,
+            LiftHistory.Reps1,
+            LiftHistory.Reps2,
+            LiftHistory.Reps3,
+            LiftHistory.Notes)\
+            .filter(LiftHistory.LiftFK == Lift.LiftID)\
+            .filter(Lift.Name == lift.Name)\
+            .order_by(LiftHistory.Date.desc()).first()
+        lift_dict = {
+            "name": lift.Name,
+            "weight": lift_row[0],
+            "previous_reps": [lift_row[1], lift_row[2], lift_row[3]],
+            "previous_notes": lift_row[4]
+        }
         lift_data.append(lift_dict)
-    return {"workout_id": workout, "lift_data": lift_data}
+    return {"workout_id": workout, "workout_notes": workout_notes, "lift_data": lift_data}
 
 
 def get_new_workout_data():
     lift_data = []
     workout = get_next_workout()
     for lift in WORKOUTS[workout]:  # TODO change query to actually look at the database....
-        data = db.session.query(LiftHistory.Weight, LiftHistory.Reps1, LiftHistory.Reps2, LiftHistory.Reps3)\
-            .filter(Lift.LiftID == LiftHistory.LiftFK).filter(Lift.Name == lift.Name).order_by(LiftHistory.Date.desc())\
+        data = db.session.query(
+            LiftHistory.Weight,
+            LiftHistory.Reps1,
+            LiftHistory.Reps2,
+            LiftHistory.Reps3,
+            LiftHistory.Notes)\
+            .filter(Lift.LiftID == LiftHistory.LiftFK)\
+            .filter(Lift.Name == lift.Name)\
+            .order_by(LiftHistory.Date.desc())\
             .limit(3).all()
         lift_dict = {"name": lift.Name, "previous_reps": []}
         if not data:
             lift_data.append(lift_dict)
             continue
         lift_dict['previous_reps'] = [data[0][1], data[0][2], data[0][3]]
+        if data[0][4]:
+            lift_dict['previous_notes'] = data[0][4]
         # if last lifts reps were all greater than or equal to 12, increase weight if possible
         if data[0][1] >= 12 and data[0][2] >= 12 and data[0][3] >= 12:
             lift_dict["weight"] = \
@@ -269,6 +292,7 @@ class LiftColander(colander.MappingSchema):
     set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
+    notes = colander.SchemaNode(colander.String())
 
 
 class LiftsColander(colander.SequenceSchema):
@@ -277,6 +301,7 @@ class LiftsColander(colander.SequenceSchema):
 
 class WorkoutColander(colander.MappingSchema):
     workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
+    notes = colander.SchemaNode(colander.String())
     lifts = LiftsColander()
 
 
@@ -285,8 +310,11 @@ class BodyweightColander(colander.MappingSchema):
 
 
 def process_workout_form(form_dict):
-    return_dict = {'workout_id': form_dict.pop('workout-id'), 'lifts': []}
+    return_dict = {'workout_id': form_dict.pop('workout-id'),
+                   'notes': form_dict.pop('workout-notes'),
+                   'lifts': []}
     weight_format_string = 'weight%i'
+    lift_notes_format_string = 'lift%inotes'
     lift_index = 1
     while True:
         if weight_format_string % lift_index not in form_dict:
@@ -295,6 +323,7 @@ def process_workout_form(form_dict):
         for set_index in range(1, 4):
             rep_string_key = 'lift%iset%i' % (lift_index, set_index)
             lift_to_add['set_%i_reps' % set_index] = form_dict.pop(rep_string_key, None)
+        lift_to_add['notes'] = form_dict.pop(lift_notes_format_string % lift_index, None)
         return_dict['lifts'].append(lift_to_add)
         lift_index += 1
     return return_dict
@@ -313,13 +342,15 @@ def save_workout_form_to_db(form, now_date):
                 Reps2=form['lift%iset2' % i],
                 Reps3=form['lift%iset3' % i],
                 Weight=form['weight%i' % i],
-                Date=now_date
+                Date=now_date,
+                Notes=form['lift%inotes' % i]
             ))
             i += 1
         db.session.add_all(lift_histories_to_add)
         db.session.add(WorkoutHistory(
             Workout=db.session.query(Workout).filter(Workout.Name == form['workout-id']).first(),
-            Date=now_date
+            Date=now_date,
+            Notes=form['workout-notes']
         ))
         db.session.commit()
     else:

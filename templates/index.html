@@ -60,7 +60,17 @@
                         </div>
                     </div>
                 </div>
+                <div class="form-group row">
+                    <div class="col-sm-12">
+                        <input type="text" class="form-control notes" id="lift{{ outer_loop.index }}notes" name="lift{{ outer_loop.index }}notes" placeholder="{{lift['previous_notes']|default('Lift Notes')}}">
+                    </div>
+                </div>
                 {% endfor %}
+                <div class="form-group row">
+                    <div class="col-sm-12">
+                        <input type="text" class="form-control notes" id="workout-notes" name="workout-notes" placeholder="{{workout_notes|default('Workout Notes')}}">
+                    </div>
+                </div>
             <button class="btn btn-primary" form="lifts">Submit</button>
             </form>
         </div>

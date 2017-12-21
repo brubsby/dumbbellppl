@@ -1,10 +1,8 @@
+from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Text, \
-    UniqueConstraint, text, func, cast, literal, types
-from sqlalchemy.ext.hybrid import hybrid_property
+    UniqueConstraint, text, types
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import Integer
-from flask_sqlalchemy import SQLAlchemy
-
 
 db = SQLAlchemy()
 metadata = db.metadata
@@ -54,6 +52,7 @@ class LiftHistory(db.Model):
     Reps3 = Column(Integer, nullable=False)
     Weight = Column(SqliteNumeric, nullable=False)
     Date = Column(Date, nullable=False)
+    Notes = Column(Text, nullable=True)
 
     Lift = relationship('Lift')
 
@@ -87,6 +86,7 @@ class WorkoutHistory(db.Model):
     WorkoutHistoryID = Column(Integer, primary_key=True)
     WorkoutFK = Column(ForeignKey('Workouts.WorkoutID'), nullable=False)
     Date = Column(Date, nullable=False)
+    Notes = Column(Text, nullable=True)
 
     Workout = relationship('Workout')
 

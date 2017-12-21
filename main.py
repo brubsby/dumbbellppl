@@ -511,7 +511,13 @@ def get_interpolated_bodyweights():
     df.index = df.index.round('h')
     df = df.resample('H').interpolate()
     df = df.resample('D').asfreq()
+
+    first_workout = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.asc()).limit(1).scalar()
+    last_workout = db.session.query(WorkoutHistory.Date).order_by(WorkoutHistory.Date.desc()).limit(1).scalar()
+    lifts_index = pandas.DatetimeIndex(start=first_workout, end=last_workout, freq='D')
+    df = df.reindex(df.index.union(lifts_index))
     df.index = df.index.date
+
     df = df.fillna(method='ffill')
     df = df.fillna(method='bfill')
     return df

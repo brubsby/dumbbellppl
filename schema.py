@@ -14,7 +14,7 @@ class SqliteNumeric(types.TypeDecorator):
 
     @property
     def python_type(self):
-        return float
+        return object
 
     impl = types.String
 
@@ -25,6 +25,11 @@ class SqliteNumeric(types.TypeDecorator):
         return str(value)
 
     def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        float_val = float(value)
+        if float_val.is_integer():
+            return int(value)
         return float(value)
 
     def process_literal_param(self, value, dialect):

@@ -438,7 +438,6 @@ def predicted_1_rm(weight, reps1, reps2, reps3, bodyweight_multiplier, bodyweigh
         return int(100 * exercise_weight / (48.8 + (53.8 * pow(math.e, (-0.075 * max_reps)))))
 
 
-
 def get_lifting_plots():
     LineScatter = namedtuple("LineScatter", ["title", "y_axis_label", "column"])
     line_scatters = [

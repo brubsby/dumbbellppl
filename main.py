@@ -292,7 +292,6 @@ class LiftColander(colander.MappingSchema):
     set_2_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     set_3_reps = colander.SchemaNode(colander.Int(), validator=colander.Range(0, 100))
     dumbbell_weight = colander.SchemaNode(colander.Float(), validator=colander.OneOf(AVAILABLE_WEIGHTS))
-    notes = colander.SchemaNode(colander.String())
 
 
 class LiftsColander(colander.SequenceSchema):
@@ -301,7 +300,6 @@ class LiftsColander(colander.SequenceSchema):
 
 class WorkoutColander(colander.MappingSchema):
     workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
-    notes = colander.SchemaNode(colander.String())
     lifts = LiftsColander()
 
 

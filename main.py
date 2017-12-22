@@ -217,7 +217,7 @@ def get_todays_workout_data():
     workout = workout_data[0]
     workout_notes = workout_data[1]
     lift_data = []
-    for lift in WORKOUTS[workout]:  # TODO Query DB instead of using constant
+    for lift in get_workout_contents(workout):
         lift_row = db.session.query(
             LiftHistory.Weight,
             LiftHistory.Reps1,
@@ -237,10 +237,21 @@ def get_todays_workout_data():
     return {"workout_id": workout, "workout_notes": workout_notes, "lift_data": lift_data}
 
 
+def get_workout_contents(workout):
+    return db.session.query(Lift)\
+        .filter(Workout.Name == workout)\
+        .filter(WorkoutContent.WorkoutFK == Workout.WorkoutID)\
+        .filter(WorkoutContent.LiftFK == Lift.LiftID).all()
+
+
+def get_all_workouts():
+    return [row[0] for row in db.session.query(Workout.Name).all()]
+
+
 def get_new_workout_data():
     lift_data = []
     workout = get_next_workout()
-    for lift in WORKOUTS[workout]:  # TODO change query to actually look at the database....
+    for lift in get_workout_contents(workout):
         data = db.session.query(
             LiftHistory.Weight,
             LiftHistory.Reps1,
@@ -298,8 +309,14 @@ class LiftsColander(colander.SequenceSchema):
     lifts = LiftColander()
 
 
+@colander.deferred
+def deferred_workout_validator(node, kw):
+    workouts = kw.get('workouts', [])
+    return colander.OneOf(workouts)
+
+
 class WorkoutColander(colander.MappingSchema):
-    workout_id = colander.SchemaNode(colander.String(), validator=colander.OneOf(WORKOUTS.keys()))
+    workout_id = colander.SchemaNode(colander.String(), validator=deferred_workout_validator)
     lifts = LiftsColander()
 
 
@@ -333,7 +350,7 @@ def save_workout_form_to_db(form, now_date):
     if not todays_workout_exists:
         i = 1
         lift_histories_to_add = []
-        for lift in WORKOUTS[form['workout-id']]:  # TODO actually get workouts from db...
+        for lift in get_workout_contents(form['workout-id']):
             lift_histories_to_add.append(LiftHistory(
                 Lift=db.session.query(Lift).filter(Lift.Name == lift.Name).first(),
                 Reps1=form['lift%iset1' % i],
@@ -375,7 +392,9 @@ def show_basic():
         kwargs = {**kwargs, **get_new_workout_data()}
 
     if flask.request.method == 'POST':
-        schema = WorkoutColander()
+        schema = WorkoutColander().bind(
+            workouts=get_all_workouts()
+        )
         form_dict = process_workout_form(flask.request.form.to_dict())
         try:
             schema.deserialize(form_dict)

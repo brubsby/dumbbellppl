@@ -243,7 +243,8 @@ def get_workout_contents(workout):
     return db.session.query(Lift)\
         .filter(Workout.Name == workout)\
         .filter(WorkoutContent.WorkoutFK == Workout.WorkoutID)\
-        .filter(WorkoutContent.LiftFK == Lift.LiftID).all()
+        .filter(WorkoutContent.LiftFK == Lift.LiftID)\
+        .order_by(WorkoutContent.WorkoutContentID.asc()).all()
 
 
 def get_all_workouts():

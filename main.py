@@ -516,8 +516,8 @@ def get_lifting_plots():
             Lift.AsymmetryMultiplier,
             Lift.BodyweightMultiplier
         ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID'])
-        if TREAT_ZERO_REPS_AS_SKIP:
-            plot_query_base.filter(
+        if TREAT_ZERO_REPS_AS_SKIP:  # filter out 0 rep lifts from graphs
+            plot_query_base = plot_query_base.filter(
                 ~((LiftHistory.Reps1 == 0) & (LiftHistory.Reps2 == 0) & (LiftHistory.Reps3 == 0)))
         df = pandas.read_sql_query(plot_query_base.selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")

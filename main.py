@@ -7,6 +7,7 @@ import itertools
 import datetime
 import colander
 import math
+import json
 
 from bokeh.plotting import figure
 from bokeh.embed import components
@@ -615,6 +616,25 @@ def show_stats():
     bodyweight_script, bodyweight_div = components(bodyweight_plot)
     return flask.render_template("stats.html", lift_grid_script=lift_grid_script, lift_grid_div=lift_grid_div,
                                  bodyweight_script=bodyweight_script, bodyweight_div=bodyweight_div)
+
+
+@app.route('/calendar')
+def show_calendar():
+    workout_calendar_data = [
+        # add day because graph counts midnight as day before
+        {"date": row[0] + datetime.timedelta(days=1), "count": 1}
+        for row
+        in db.session.query(WorkoutHistory.Date)
+            .filter(WorkoutHistory.WorkoutFK == Workout.WorkoutID)
+            .filter((Workout.Name != 'REST') & (Workout.Name != 'MISS')).all()
+    ]
+
+    def date_handler(obj):
+        return (obj.isoformat()
+                if isinstance(obj, (datetime.datetime, datetime.date))
+                else None)
+    return flask.render_template("calendar.html", workout_calendar_data=json.dumps(workout_calendar_data,
+                                                                                   default=date_handler))
 
 
 @app.route('/static/<path:path>')

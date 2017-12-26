@@ -14,12 +14,14 @@ from bokeh.palettes import Category20
 from bokeh.layouts import gridplot
 from bokeh.models import HoverTool, ColumnDataSource
 import pandas
-from sqlalchemy import literal, func, cast
+from sqlalchemy import literal
 from flask_migrate import Migrate
 
 from schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 
 import os
+
+TREAT_ZERO_REPS_AS_SKIP = True
 
 LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier', 'BodyweightMultiplier'])
 LiftTuple.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
@@ -500,9 +502,8 @@ def get_lifting_plots():
                             x_axis_type='datetime', sizing_mode='scale_width'))
     lifts_df = pandas.read_sql_query(db.session.query(Lift.LiftID, Lift.Name).selectable, db.session.get_bind())
     interpolated_bodyweights_dataframe = get_interpolated_bodyweights()
-    # lifts_df = pandas.read_sql_query("SELECT LiftID, Name FROM Lifts;", conn)
     for name, row in lifts_df.iterrows():
-        df = pandas.read_sql_query(db.session.query(
+        plot_query_base = db.session.query(
             LiftHistory.LiftHistoryID,
             Lift.Name,
             LiftHistory.Date,
@@ -513,7 +514,11 @@ def get_lifting_plots():
             Lift.VolumeMultiplier,
             Lift.AsymmetryMultiplier,
             Lift.BodyweightMultiplier
-        ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID']).selectable,
+        ).filter(LiftHistory.LiftFK == Lift.LiftID).filter(LiftHistory.LiftFK == row['Lifts_LiftID'])
+        if TREAT_ZERO_REPS_AS_SKIP:
+            plot_query_base.filter(
+                ~((LiftHistory.Reps1 == 0) & (LiftHistory.Reps2 == 0) & (LiftHistory.Reps3 == 0)))
+        df = pandas.read_sql_query(plot_query_base.selectable,
                                    db.session.get_bind(), "LiftHistory_LiftHistoryID")
         df = add_interpolated_bodyweights(df, interpolated_bodyweights_dataframe=interpolated_bodyweights_dataframe)
         df['Volume'] = df.apply(calculate_volume_for_row, axis=1)

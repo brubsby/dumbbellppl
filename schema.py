@@ -66,6 +66,7 @@ class Lift(db.Model):
     AsymmetryMultiplier = Column(Integer, CheckConstraint('AsymmetryMultiplier IN (1, 2)'), server_default=text("1"))
     BodyweightMultiplier = Column(SqliteNumeric, server_default=text("0"))
 
+
 class WorkoutContent(db.Model):
     __tablename__ = 'WorkoutContents'
     __table_args__ = (

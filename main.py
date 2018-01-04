@@ -17,6 +17,7 @@ from bokeh.models import HoverTool, ColumnDataSource
 import pandas
 from sqlalchemy import literal
 from flask_migrate import Migrate
+import config
 
 from schema import db, Lift, WorkoutContent, Workout, WorkoutHistory, BodyweightHistory, LiftHistory
 
@@ -68,7 +69,7 @@ DAY_WORKOUT_DICT = {
 app = flask.Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'userdata.db')
 os.makedirs(os.path.split(DB_PATH)[0], exist_ok=True)
-DB_URI = 'sqlite:///{}'.format(DB_PATH)
+DB_URI = 'postgresql://%(user)s:%(passwd)s@%(host)s:%(port)s/%(db)s' % config.postgres
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 db.init_app(app)
 migrate = Migrate(app, db)

@@ -74,7 +74,6 @@ class Workout(db.Model):
     Name = Column(Text, nullable=False, unique=True)
 
 
-
 class WorkoutContent(db.Model):
     __tablename__ = 'WorkoutContents'
 

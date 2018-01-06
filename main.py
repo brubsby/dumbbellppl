@@ -25,7 +25,7 @@ import os
 TREAT_ZERO_REPS_AS_SKIP = True
 
 LiftTuple = namedtuple("Lift", ['Name', 'VolumeMultiplier', 'AsymmetryMultiplier', 'BodyweightMultiplier'])
-LiftTuple.__new__.__defaults__ = (None, 2, 1)  # most dumbbell lifts use two dumbbells in unison
+LiftTuple.__new__.__defaults__ = (None, 2, 1, 0)  # most dumbbell lifts use two dumbbells in unison
 
 WORKOUTS = OrderedDict(sorted({
     'PUSH_LIFTS': [
@@ -84,7 +84,8 @@ def initialize_db():
         Lift(
             Name=lift.Name,
             VolumeMultiplier=lift.VolumeMultiplier,
-            AsymmetryMultiplier=lift.AsymmetryMultiplier)
+            AsymmetryMultiplier=lift.AsymmetryMultiplier,
+            BodyweightMultiplier=lift.BodyweightMultiplier)
         for lift in list(set(itertools.chain.from_iterable(WORKOUTS.values())))
     ]
     for lift in lifts:

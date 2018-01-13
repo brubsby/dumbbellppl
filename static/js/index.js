@@ -4,7 +4,7 @@ function startTimer()
 {
     clearInterval(counterBack);
     $('.progress-bar').css('width', '100%');
-    var seconds = 90;
+    var seconds = 180;
     var secondsRemaining = seconds
     counterBack = setInterval(function(){
     secondsRemaining--;

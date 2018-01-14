@@ -6,3 +6,4 @@ sqlalchemy
 flask_sqlalchemy
 flask_migrate
 numpy
+psycopg2

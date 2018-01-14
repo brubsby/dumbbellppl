@@ -1,0 +1,5 @@
+postgres = {'host': 'localhost',
+            'user': 'root',
+            'passwd': 'my secret password',
+            'db': 'database',
+            'port': '5432'}

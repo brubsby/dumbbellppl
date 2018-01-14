@@ -42,11 +42,21 @@ class BodyweightHistory(db.Model):
     Datetime = Column(DateTime, nullable=False)
 
 
+class Lift(db.Model):
+    __tablename__ = 'Lifts'
+
+    LiftID = Column(Integer, primary_key=True)
+    Name = Column(Text, nullable=False, unique=True)
+    VolumeMultiplier = Column(Integer, CheckConstraint('"VolumeMultiplier" IN (1, 2)'), server_default=text("2"))
+    AsymmetryMultiplier = Column(Integer, CheckConstraint('"AsymmetryMultiplier" IN (1, 2)'), server_default=text("1"))
+    BodyweightMultiplier = Column(SqliteNumeric, server_default=text("0"))
+
+
 class LiftHistory(db.Model):
     __tablename__ = 'LiftHistory'
 
     LiftHistoryID = Column(Integer, primary_key=True)
-    LiftFK = Column(ForeignKey('Lifts.LiftID'), nullable=False)
+    LiftFK = Column(ForeignKey(Lift.LiftID), nullable=False)
     Reps1 = Column(Integer, nullable=False)
     Reps2 = Column(Integer, nullable=False)
     Reps3 = Column(Integer, nullable=False)
@@ -54,41 +64,7 @@ class LiftHistory(db.Model):
     Date = Column(Date, nullable=False)
     Notes = Column(Text, nullable=True)
 
-    Lift = relationship('Lift')
-
-
-class Lift(db.Model):
-    __tablename__ = 'Lifts'
-
-    LiftID = Column(Integer, primary_key=True)
-    Name = Column(Text, nullable=False, unique=True)
-    VolumeMultiplier = Column(Integer, CheckConstraint('VolumeMultiplier IN (1, 2)'), server_default=text("2"))
-    AsymmetryMultiplier = Column(Integer, CheckConstraint('AsymmetryMultiplier IN (1, 2)'), server_default=text("1"))
-    BodyweightMultiplier = Column(SqliteNumeric, server_default=text("0"))
-
-class WorkoutContent(db.Model):
-    __tablename__ = 'WorkoutContents'
-    __table_args__ = (
-        UniqueConstraint('WorkoutFK', 'LiftFK'),
-    )
-
-    WorkoutContentID = Column(Integer, primary_key=True)
-    WorkoutFK = Column(ForeignKey('Workouts.WorkoutID'), nullable=False)
-    LiftFK = Column(ForeignKey('Lifts.LiftID'), nullable=False)
-
-    Lift = relationship('Lift')
-    Workout = relationship('Workout')
-
-
-class WorkoutHistory(db.Model):
-    __tablename__ = 'WorkoutHistory'
-
-    WorkoutHistoryID = Column(Integer, primary_key=True)
-    WorkoutFK = Column(ForeignKey('Workouts.WorkoutID'), nullable=False)
-    Date = Column(Date, nullable=False)
-    Notes = Column(Text, nullable=True)
-
-    Workout = relationship('Workout')
+    Lift = relationship(Lift)
 
 
 class Workout(db.Model):
@@ -96,3 +72,29 @@ class Workout(db.Model):
 
     WorkoutID = Column(Integer, primary_key=True)
     Name = Column(Text, nullable=False, unique=True)
+
+
+class WorkoutContent(db.Model):
+    __tablename__ = 'WorkoutContents'
+
+    WorkoutContentID = Column(Integer, primary_key=True)
+    WorkoutFK = Column(ForeignKey(Workout.WorkoutID), nullable=False)
+    LiftFK = Column(ForeignKey(Lift.LiftID), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(WorkoutFK, LiftFK),
+    )
+
+    Lift = relationship(Lift)
+    Workout = relationship(Workout)
+
+
+class WorkoutHistory(db.Model):
+    __tablename__ = 'WorkoutHistory'
+
+    WorkoutHistoryID = Column(Integer, primary_key=True)
+    WorkoutFK = Column(ForeignKey(Workout.WorkoutID), nullable=False)
+    Date = Column(Date, nullable=False)
+    Notes = Column(Text, nullable=True)
+
+    Workout = relationship(Workout)

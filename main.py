@@ -276,7 +276,7 @@ def get_new_workout_data():
         if data[0][4]:
             lift_dict['previous_notes'] = data[0][4]
         # if last lifts reps were all greater than or equal to 12, increase weight if possible
-        if data[0][1] >= 12 and data[0][2] >= 12 and data[0][3] >= 12:
+        if (data[0][1] + data[0][2] + data[0][3]) >= (12 * 3):
             lift_dict["weight"] = \
                 AVAILABLE_WEIGHTS[min(AVAILABLE_WEIGHTS.index(data[0][0]) + 1, len(AVAILABLE_WEIGHTS) - 1)]
             lift_data.append(lift_dict)
